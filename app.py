@@ -1,151 +1,173 @@
 import io
 import re
+import uuid
+import urllib.parse
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import pdfplumber
 
 st.set_page_config(
-    page_title="Corporate Claims Intelligence | لوحة تسعير وتفاوض التأمين الطبي",
+    page_title="Claims Experience Ingestor",
     page_icon="🛡️",
-    layout="wide"
+    layout="centered"
 )
 
-# واجهة التفاوض والمعاملات
-st.sidebar.header("⚙️ معايير التفاوض الاكتواري")
-medical_trend = st.sidebar.slider(
-    "نسبة التضخم الطبي المتوقعة (Medical Trend %):",
-    min_value=5.0, max_value=20.0, value=10.0, step=0.5
-) / 100.0
+# رابط لوحة Looker Studio الأساسية (يتم استبدال المعرف برابط لوحتك الفعلي)
+LOOKER_STUDIO_BASE_URL = "https://lookerstudio.google.com/reporting/YOUR_REPORT_ID/page/YOUR_PAGE_ID"
 
-insurer_loading = st.sidebar.slider(
-    "هامش التحميلات ومصاريف التأمين (Expense & Margin %):",
-    min_value=15.0, max_value=30.0, value=22.0, step=1.0
-) / 100.0
+def generate_session_id():
+    return f"SES_{uuid.uuid4().hex[:8].upper()}"
 
-st.sidebar.markdown("---")
-st.sidebar.info("🔒 الأمان والامتثال: تتم معالجة البيانات لحظياً داخل الجلسة ولا يتم حفظ أو تخزين أي سجلات علاجية للموظفين.")
-
-# محرك قراءة الملفات
-def parse_claims_file(uploaded_file):
+def parse_claims_report(uploaded_file, session_id):
     fname = uploaded_file.name.lower()
     monthly_rows = []
-    metadata = {"Class": "غير محدد", "Deductible": "غير محدد", "Limit": "غير محدد"}
-
+    benefits_rows = []
+    providers_rows = []
+    
     if fname.endswith(('.xlsx', '.xls')):
         xls = pd.ExcelFile(uploaded_file)
+        
+        # 1. قراءة بيانات الأداء الشهري (Monthly Claims)
         df_mc = pd.read_excel(xls, sheet_name='Monthly Claims', header=None)
-
-        # استخراج الترويسة
-        try:
-            metadata["Class"] = str(df_mc.iloc[4, 1])
-            metadata["Deductible"] = str(df_mc.iloc[5, 1])
-            metadata["Limit"] = str(df_mc.iloc[6, 1])
-        except Exception:
-            pass
-
-        # استخراج بيانات الأشهر والسنوات
-        current_year = None
+        class_tier = str(df_mc.iloc[5, 1]) if pd.notna(df_mc.iloc[5, 1]) else "Class A"
+        
+        curr_year = None
         for _, row in df_mc.iterrows():
-            col0 = str(row[0]).strip()
-            if "2 Years Prior" in col0:
-                current_year = "PY-1 (قبل سنتين)"
-            elif "Prior Policy Year" in col0:
-                current_year = "PY (السنة السابقة)"
-            elif "Last Policy Year" in col0 or "Current" in col0:
-                current_year = "CY (السنة الحالية)"
-            elif re.match(r'^\d{6}$', col0) and current_year:
+            val0 = str(row[0]).strip()
+            if "2 Years Prior" in val0:
+                curr_year = "PY-1"
+                continue
+            elif "Prior Policy Year" in val0:
+                curr_year = "PY"
+                continue
+            elif "Last Policy Year" in val0 or "Current" in val0:
+                curr_year = "CY"
+                continue
+            
+            if re.match(r'^\d{6}$', val0) and curr_year:
                 monthly_rows.append({
-                    "Year": current_year,
-                    "Month": col0,
-                    "Lives": float(row[1]) if pd.notna(row[1]) else 0,
-                    "Claims_Count": float(row[2]) if pd.notna(row[2]) else 0,
-                    "Paid_SAR": float(row[3]) if pd.notna(row[3]) else 0
+                    'session_id': session_id,
+                    'class_tier': class_tier,
+                    'policy_year': curr_year,
+                    'month_code': val0,
+                    'active_lives': float(row[1]) if pd.notna(row[1]) else 0.0,
+                    'claims_count': float(row[2]) if pd.notna(row[2]) else 0.0,
+                    'paid_claims_sar': float(row[3]) if pd.notna(row[3]) else 0.0,
+                    'paid_claims_vat_sar': float(row[4]) if pd.notna(row[4]) else 0.0
+                })
+        
+        # 2. قراءة تشريح المنافع (Breakdown by Benefit)
+        df_bb = pd.read_excel(xls, sheet_name='Breakdown by Benefit', header=None)
+        curr_year = None
+        for _, row in df_bb.iterrows():
+            val0 = str(row[0]).strip()
+            if "2 Years Prior" in val0:
+                curr_year = "PY-1"
+                continue
+            elif "Prior Policy Year" in val0:
+                curr_year = "PY"
+                continue
+            elif "Last Policy Year" in val0 or "Current" in val0:
+                curr_year = "CY"
+                continue
+            
+            if re.match(r'^\d*\.?[A-Za-z]', val0) and curr_year and "Overall" not in val0:
+                benefits_rows.append({
+                    'session_id': session_id,
+                    'class_tier': class_tier,
+                    'policy_year': curr_year,
+                    'benefit_name': val0,
+                    'claims_count': float(row[1]) if pd.notna(row[1]) else 0.0,
+                    'paid_claims_sar': float(row[2]) if pd.notna(row[2]) else 0.0,
+                    'paid_claims_vat_sar': float(row[3]) if pd.notna(row[3]) else 0.0
+                })
+
+        # 3. قراءة مقدمي الخدمة (Top Providers)
+        df_tp = pd.read_excel(xls, sheet_name='Top Providers', header=None)
+        curr_year = None
+        for _, row in df_tp.iterrows():
+            val0 = str(row[0]).strip()
+            if "2 Years Prior" in val0:
+                curr_year = "PY-1"
+                continue
+            elif "Prior Policy Year" in val0:
+                curr_year = "PY"
+                continue
+            elif "Lasr Policy Year" in val0 or "Last Policy Year" in val0:
+                curr_year = "CY"
+                continue
+            
+            if re.match(r'^\d+$', val0) and curr_year:
+                providers_rows.append({
+                    'session_id': session_id,
+                    'class_tier': class_tier,
+                    'policy_year': curr_year,
+                    'rank': int(val0),
+                    'provider_name': str(row[1]).strip(),
+                    'claims_count': float(row[2]) if pd.notna(row[2]) else 0.0,
+                    'paid_claims_sar': float(row[3]) if pd.notna(row[3]) else 0.0,
+                    'paid_claims_vat_sar': float(row[4]) if pd.notna(row[4]) else 0.0
                 })
 
     elif fname.endswith('.pdf'):
+        # معالجة ملف الـ PDF عبر pdfplumber واستخراج الأرقام لنفس الحقول
         with pdfplumber.open(uploaded_file) as pdf:
-            text = "\n".join([p.extract_text() or "" for p in pdf.pages])
-            current_year = "CY (السنة الحالية)"
+            text = "\n".join([page.extract_text() or "" for page in pdf.pages])
+            curr_year = "CY"
             for line in text.split("\n"):
-                match = re.search(r'(\d{6})\s+(\d+)\s+(\d+)\s+([\d,\.]+)', line)
+                match = re.search(r'(\d{6})\s+(\d+)\s+(\d+)\s+([\d,\.]+)\s+([\d,\.]+)', line)
                 if match:
                     monthly_rows.append({
-                        "Year": current_year,
-                        "Month": match.group(1),
-                        "Lives": float(match.group(2)),
-                        "Claims_Count": float(match.group(3)),
-                        "Paid_SAR": float(match.group(4).replace(',', ''))
+                        'session_id': session_id,
+                        'class_tier': "Class A",
+                        'policy_year': curr_year,
+                        'month_code': match.group(1),
+                        'active_lives': float(match.group(2)),
+                        'claims_count': float(match.group(3)),
+                        'paid_claims_sar': float(match.group(4).replace(',', '')),
+                        'paid_claims_vat_sar': float(match.group(5).replace(',', ''))
                     })
 
-    return metadata, pd.DataFrame(monthly_rows)
+    return (
+        pd.DataFrame(monthly_rows),
+        pd.DataFrame(benefits_rows),
+        pd.DataFrame(providers_rows)
+    )
 
-# واجهة المستخدم التنفيذية
-st.title("🛡️ لوحة تسعير وتفاوض التأمين الطبي للشركات")
-st.caption("أداة تحليل الأداء الفني لتقارير هيئة التأمين، عزل التضخم، واحتساب التسعير العادل للفئات.")
+# واجهة الاستيعاب والرفع (المضمنة داخل Looker)
+st.markdown("### 📤 رفع تقرير تجربة المطالبات (Claims Experience)")
+st.caption("الأنظمة المدعومة: تقارير هيئة التأمين بصيغة Excel أو PDF. المعالجة معزولة ومحمية بالكامل.")
 
-uploaded = st.file_uploader("اسحب تقرير تجربة المطالبات المعتمد (Excel أو PDF)", type=["xlsx", "xls", "pdf"])
+uploaded = st.file_uploader("اختر ملف التقرير للبدء بالتحليل اللحظي:", type=["xlsx", "xls", "pdf"])
 
 if uploaded:
-    metadata, df = parse_claims_file(uploaded)
-    
-    if df.empty:
-        st.error("تعذر قراءة الجداول من الملف. تأكد من أن الملف مطابق لنموذج تقرير تجربة المطالبات المعتمد.")
-    else:
-        st.subheader("1. الملخص الفني ومعدل الحرق السنوي لكل رأس (Burning Rate)")
+    session_id = generate_session_id()
+    with st.spinner("جارٍ تفكيك وتسطيح البيانات وعزل الجلسة..."):
+        df_monthly, df_benefits, df_providers = parse_claims_report(uploaded, session_id)
         
-        # تجميع الأداء حسب السنة
-        summary = []
-        for yr in df['Year'].unique():
-            sub = df[df['Year'] == yr]
-            m_count = len(sub)
-            tot_paid = sub['Paid_SAR'].sum()
-            avg_lives = sub['Lives'].mean() if sub['Lives'].mean() > 0 else 1
+        if df_monthly.empty:
+            st.error("تعذر التعرف على جداول التقرير. يرجى التأكد من رفع النموذج المعتمد.")
+        else:
+            # تجهيز رابط Looker Studio الديناميكي المفلتر بالـ session_id
+            params = {"ds0.session_id": session_id}
+            encoded_params = urllib.parse.quote(str(params).replace("'", '"'))
+            looker_url = f"{LOOKER_STUDIO_BASE_URL}?params={encoded_params}"
             
-            # تسوية سنوية لأشهر الرصد
-            annualized_paid = (tot_paid / m_count) * 12 if m_count > 0 else tot_paid
-            annualized_cpl = annualized_paid / avg_lives
+            st.success(f"تمت معالجة البيانات بنجاح! رمز جلستك المعزولة: **{session_id}**")
             
-            summary.append({
-                "فترة الرصد": yr,
-                "أشهر التقرير": m_count,
-                "متوسط الأعضاء": int(avg_lives),
-                "المطالبات المدفوعة (SAR)": tot_paid,
-                "معدل الاستهلاك السنوي للفرد (SAR)": annualized_cpl
-            })
+            # زر نقل المستخدم مباشرة إلى اللوحة المخصصة
+            st.link_button("🚀 فتح لوحة التحليل والتفاوض الخاصة بك", looker_url, type="primary")
             
-        res_df = pd.DataFrame(summary)
-        st.dataframe(res_df.style.format({
-            "متوسط الأعضاء": "{:,}",
-            "المطالبات المدفوعة (SAR)": "{:,.0f}",
-            "معدل الاستهلاك السنوي للفرد (SAR)": "{:,.0f}"
-        }), use_container_width=True)
-
-        # حساب السعر الفني العادل للسنة القادمة (بناءً على أحدث فترة)
-        latest_cpl = res_df.iloc[-1]["معدل الاستهلاك السنوي للفرد (SAR)"]
-        latest_lives = res_df.iloc[-1]["متوسط الأعضاء"]
-        
-        pure_tech_rate = latest_cpl * (1 + medical_trend)
-        fair_renewal_premium = pure_tech_rate / (1 - insurer_loading)
-        projected_budget = fair_renewal_premium * latest_lives
-
-        st.markdown("---")
-        st.subheader("2. مصفوفة التفاوض والتسعير المقترح للتجديد (Renewal Matrix)")
-        
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric("تكلفة الفرد الفنية المتوقعة (بعد التضخم)", f"{pure_tech_rate:,.0f} SAR")
-        with c2:
-            st.metric("قسط التجديد العادل المقترح للفرد", f"{fair_renewal_premium:,.0f} SAR")
-        with c3:
-            st.metric("الميزانية التقديرية العادلة للوثيقة", f"{projected_budget:,.0f} SAR")
-
-        # رسم بياني للاتجاه الشهري
-        st.markdown("---")
-        st.subheader("3. مسار المطالبات الشهرية")
-        fig = px.bar(df, x="Month", y="Paid_SAR", color="Year", title="صافي المطالبات المدفوعة شهرياً (SAR)", text_auto='.2s')
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.success(f"💡 نصيحة لغرفة التفاوض: إذا طلبت شركة التأمين سعراً يتجاوز {fair_renewal_premium:,.0f} ريال للفرد، فهذا يعني أن نسبة التحميل تتجاوز {insurer_loading*100:.0f}% أو أنهم يفترضون تضخماً طبياً غير مبرر.")
-else:
-    st.info("👆 يرجى رفع ملف التقرير لعرض المؤشرات ومحاكاة التسعير العادل.")
+            # تنزيل الجداول المسطحة (كخيار احتياطي ومساند)
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                df_monthly.to_excel(writer, sheet_name='Monthly_Performance', index=False)
+                df_benefits.to_excel(writer, sheet_name='Benefits_Breakdown', index=False)
+                df_providers.to_excel(writer, sheet_name='Top_Providers', index=False)
+            
+            st.download_button(
+                label="📥 تحميل البيانات المسطحة النظيفة (Excel)",
+                data=excel_buffer.getvalue(),
+                file_name=f"Clean_Claims_{session_id}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
