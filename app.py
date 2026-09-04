@@ -13,7 +13,7 @@ st.set_page_config(
 )
 
 # رابط لوحة Looker Studio الأساسية (يتم استبدال المعرف بالرابط الفعلي لاحقاً)
-LOOKER_STUDIO_BASE_URL = "https://lookerstudio.google.com/reporting/YOUR_REPORT_ID/page/YOUR_PAGE_ID"
+LOOKER_STUDIO_BASE_URL = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47/page/1f97F"
 
 def generate_session_id():
     return f"SES_{uuid.uuid4().hex[:8].upper()}"
