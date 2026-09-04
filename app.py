@@ -42,7 +42,7 @@ TEXTS = {
     }
 }
 
-# اختيار اللغة
+# اختيار اللغة من الشريط الجانبي
 with st.sidebar:
     lang_choice = st.radio(
         "Interface Language / لغة الواجهة",
@@ -233,19 +233,19 @@ if uploaded:
                 # الحقن البرمجي المباشر في Google Sheets
                 append_to_sheets(df_monthly, df_benefits, df_providers)
                 
-               params = {
-            "ds0.p_session_id": session_id,
-            "ds1.p_session_id": session_id,
-            "ds2.p_session_id": session_id
-        }
+                # تمرير معلمات العزل للمصادر الثلاثة
+                params = {
+                    "ds0.p_session_id": session_id,
+                    "ds1.p_session_id": session_id,
+                    "ds2.p_session_id": session_id
+                }
                 encoded_params = urllib.parse.quote(str(params).replace("'", '"'))
                 looker_url = f"{LOOKER_STUDIO_BASE_URL}?params={encoded_params}"
                 
                 st.success(f"{t['success_msg']} **{session_id}**")
-                
                 st.link_button(t['btn_dashboard'], looker_url, type="primary")
                 
-                # خيار حفظ نسخة مسطحة كاحتياط
+                # نسخة احتياطية مسطحة
                 excel_buffer = io.BytesIO()
                 with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                     df_monthly.to_excel(writer, sheet_name='Monthly_Performance', index=False)
