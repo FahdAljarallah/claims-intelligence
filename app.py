@@ -12,11 +12,20 @@ st.set_page_config(
     layout="centered"
 )
 
-# رابط لوحة Looker Studio الأساسية (يتم استبدال المعرف برابط لوحتك الفعلي)
+# رابط لوحة Looker Studio الأساسية (يتم استبدال المعرف بالرابط الفعلي لاحقاً)
 LOOKER_STUDIO_BASE_URL = "https://lookerstudio.google.com/reporting/YOUR_REPORT_ID/page/YOUR_PAGE_ID"
 
 def generate_session_id():
     return f"SES_{uuid.uuid4().hex[:8].upper()}"
+
+def clean_num(val):
+    if pd.isna(val):
+        return None
+    try:
+        cleaned = str(val).replace(',', '').strip()
+        return float(cleaned)
+    except (ValueError, TypeError):
+        return None
 
 def parse_claims_report(uploaded_file, session_id):
     fname = uploaded_file.name.lower()
@@ -45,16 +54,18 @@ def parse_claims_report(uploaded_file, session_id):
                 continue
             
             if re.match(r'^\d{6}$', val0) and curr_year:
-                monthly_rows.append({
-                    'session_id': session_id,
-                    'class_tier': class_tier,
-                    'policy_year': curr_year,
-                    'month_code': val0,
-                    'active_lives': float(row[1]) if pd.notna(row[1]) else 0.0,
-                    'claims_count': float(row[2]) if pd.notna(row[2]) else 0.0,
-                    'paid_claims_sar': float(row[3]) if pd.notna(row[3]) else 0.0,
-                    'paid_claims_vat_sar': float(row[4]) if pd.notna(row[4]) else 0.0
-                })
+                c_count = clean_num(row[2])
+                if c_count is not None:
+                    monthly_rows.append({
+                        'session_id': session_id,
+                        'class_tier': class_tier,
+                        'policy_year': curr_year,
+                        'month_code': val0,
+                        'active_lives': clean_num(row[1]) or 0.0,
+                        'claims_count': c_count,
+                        'paid_claims_sar': clean_num(row[3]) or 0.0,
+                        'paid_claims_vat_sar': clean_num(row[4]) or 0.0
+                    })
         
         # 2. قراءة تشريح المنافع (Breakdown by Benefit)
         df_bb = pd.read_excel(xls, sheet_name='Breakdown by Benefit', header=None)
@@ -71,16 +82,18 @@ def parse_claims_report(uploaded_file, session_id):
                 curr_year = "CY"
                 continue
             
-            if re.match(r'^\d*\.?[A-Za-z]', val0) and curr_year and "Overall" not in val0:
-                benefits_rows.append({
-                    'session_id': session_id,
-                    'class_tier': class_tier,
-                    'policy_year': curr_year,
-                    'benefit_name': val0,
-                    'claims_count': float(row[1]) if pd.notna(row[1]) else 0.0,
-                    'paid_claims_sar': float(row[2]) if pd.notna(row[2]) else 0.0,
-                    'paid_claims_vat_sar': float(row[3]) if pd.notna(row[3]) else 0.0
-                })
+            if curr_year and "Overall" not in val0 and "Monthly Claims" not in val0:
+                c_count = clean_num(row[1])
+                if c_count is not None:
+                    benefits_rows.append({
+                        'session_id': session_id,
+                        'class_tier': class_tier,
+                        'policy_year': curr_year,
+                        'benefit_name': val0,
+                        'claims_count': c_count,
+                        'paid_claims_sar': clean_num(row[2]) or 0.0,
+                        'paid_claims_vat_sar': clean_num(row[3]) or 0.0
+                    })
 
         # 3. قراءة مقدمي الخدمة (Top Providers)
         df_tp = pd.read_excel(xls, sheet_name='Top Providers', header=None)
@@ -98,19 +111,20 @@ def parse_claims_report(uploaded_file, session_id):
                 continue
             
             if re.match(r'^\d+$', val0) and curr_year:
-                providers_rows.append({
-                    'session_id': session_id,
-                    'class_tier': class_tier,
-                    'policy_year': curr_year,
-                    'rank': int(val0),
-                    'provider_name': str(row[1]).strip(),
-                    'claims_count': float(row[2]) if pd.notna(row[2]) else 0.0,
-                    'paid_claims_sar': float(row[3]) if pd.notna(row[3]) else 0.0,
-                    'paid_claims_vat_sar': float(row[4]) if pd.notna(row[4]) else 0.0
-                })
+                c_count = clean_num(row[2])
+                if c_count is not None:
+                    providers_rows.append({
+                        'session_id': session_id,
+                        'class_tier': class_tier,
+                        'policy_year': curr_year,
+                        'rank': int(val0),
+                        'provider_name': str(row[1]).strip(),
+                        'claims_count': c_count,
+                        'paid_claims_sar': clean_num(row[3]) or 0.0,
+                        'paid_claims_vat_sar': clean_num(row[4]) or 0.0
+                    })
 
     elif fname.endswith('.pdf'):
-        # معالجة ملف الـ PDF عبر pdfplumber واستخراج الأرقام لنفس الحقول
         with pdfplumber.open(uploaded_file) as pdf:
             text = "\n".join([page.extract_text() or "" for page in pdf.pages])
             curr_year = "CY"
@@ -122,10 +136,10 @@ def parse_claims_report(uploaded_file, session_id):
                         'class_tier': "Class A",
                         'policy_year': curr_year,
                         'month_code': match.group(1),
-                        'active_lives': float(match.group(2)),
-                        'claims_count': float(match.group(3)),
-                        'paid_claims_sar': float(match.group(4).replace(',', '')),
-                        'paid_claims_vat_sar': float(match.group(5).replace(',', ''))
+                        'active_lives': clean_num(match.group(2)) or 0.0,
+                        'claims_count': clean_num(match.group(3)) or 0.0,
+                        'paid_claims_sar': clean_num(match.group(4)) or 0.0,
+                        'paid_claims_vat_sar': clean_num(match.group(5)) or 0.0
                     })
 
     return (
@@ -134,7 +148,7 @@ def parse_claims_report(uploaded_file, session_id):
         pd.DataFrame(providers_rows)
     )
 
-# واجهة الاستيعاب والرفع (المضمنة داخل Looker)
+# واجهة الاستيعاب والرفع
 st.markdown("### 📤 رفع تقرير تجربة المطالبات (Claims Experience)")
 st.caption("الأنظمة المدعومة: تقارير هيئة التأمين بصيغة Excel أو PDF. المعالجة معزولة ومحمية بالكامل.")
 
@@ -148,17 +162,16 @@ if uploaded:
         if df_monthly.empty:
             st.error("تعذر التعرف على جداول التقرير. يرجى التأكد من رفع النموذج المعتمد.")
         else:
-            # تجهيز رابط Looker Studio الديناميكي المفلتر بالـ session_id
+            # تجهيز رابط Looker Studio الديناميكي المفلتر بالمعلمة ds0.p_session_id
             params = {"ds0.p_session_id": session_id}
             encoded_params = urllib.parse.quote(str(params).replace("'", '"'))
             looker_url = f"{LOOKER_STUDIO_BASE_URL}?params={encoded_params}"
             
             st.success(f"تمت معالجة البيانات بنجاح! رمز جلستك المعزولة: **{session_id}**")
             
-            # زر نقل المستخدم مباشرة إلى اللوحة المخصصة
             st.link_button("🚀 فتح لوحة التحليل والتفاوض الخاصة بك", looker_url, type="primary")
             
-            # تنزيل الجداول المسطحة (كخيار احتياطي ومساند)
+            # تجهيز ملف الإكسل النظيف للتحميل
             excel_buffer = io.BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                 df_monthly.to_excel(writer, sheet_name='Monthly_Performance', index=False)
