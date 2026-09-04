@@ -2,6 +2,7 @@ import io
 import re
 import uuid
 import urllib.parse
+from datetime import datetime
 import streamlit as st
 import pandas as pd
 import pdfplumber
@@ -26,6 +27,9 @@ TEXTS = {
         "success_msg": "تمت معالجة البيانات وحقنها بنجاح! رمز جلستك المعزولة:",
         "btn_dashboard": "🚀 فتح لوحة التحليل والتفاوض الخاصة بك",
         "btn_download": "📥 تحميل نسخة احتياطية مسطحة (Excel)",
+        "btn_purge": "🔒 إنهاء جلسة التفاوض وحذف البيانات فوراً",
+        "purging_msg": "جارٍ إتلاف سجلات الجلسة من خوادم المعالجة بأمان...",
+        "purge_success": "تم إتلاف بيانات الجلسة بنجاح من قاعدة البيانات المركزية.",
         "sec_lang": "اللغة / Language"
     },
     "en": {
@@ -38,6 +42,9 @@ TEXTS = {
         "success_msg": "Data processed and integrated successfully! Isolated Session ID:",
         "btn_dashboard": "🚀 Launch Negotiation & Analysis Dashboard",
         "btn_download": "📥 Download Clean Backup Data (Excel)",
+        "btn_purge": "🔒 End Session & Purge Data Immediately",
+        "purging_msg": "Securely purging session records from the central repository...",
+        "purge_success": "Session data has been completely erased from the repository.",
         "sec_lang": "Language / اللغة"
     }
 }
@@ -92,8 +99,27 @@ def append_to_sheets(df_monthly, df_benefits, df_providers):
     ws_p = sh.worksheet("Top_Providers")
     ws_p.append_rows(df_providers.values.tolist())
 
+def delete_session_data(target_session_id):
+    """حذف كافة الصفوف المرتبطة بالجلسة فورياً من التبويبات الثلاثة"""
+    client = get_gspread_client()
+    sheet_id = st.secrets["SPREADSHEET_ID"]
+    sh = client.open_by_key(sheet_id)
+    
+    worksheets = ["Monthly_Performance", "Benefits_Breakdown", "Top_Providers"]
+    for ws_name in worksheets:
+        ws = sh.worksheet(ws_name)
+        session_col = ws.col_values(1)  # عمود session_id
+        
+        # حصر أرقام الصفوف المطابقة والحذف من الأسفل للأعلى لضمان ثبات الترقيم
+        rows_to_delete = [
+            i + 1 for i, val in enumerate(session_col) if val == target_session_id
+        ]
+        for row_idx in reversed(rows_to_delete):
+            ws.delete_rows(row_idx)
+
 def parse_claims_report(uploaded_file, session_id):
     fname = uploaded_file.name.lower()
+    timestamp = datetime.utcnow().isoformat()
     monthly_rows = []
     benefits_rows = []
     providers_rows = []
@@ -130,7 +156,8 @@ def parse_claims_report(uploaded_file, session_id):
                             'active_lives': clean_num(row[1]) or 0.0,
                             'claims_count': c_count,
                             'paid_claims_sar': clean_num(row[3]) or 0.0,
-                            'paid_claims_vat_sar': clean_num(row[4]) or 0.0
+                            'paid_claims_vat_sar': clean_num(row[4]) or 0.0,
+                            'created_at': timestamp
                         })
         
         # 2. Breakdown by Benefit
@@ -159,7 +186,8 @@ def parse_claims_report(uploaded_file, session_id):
                             'benefit_name': val0,
                             'claims_count': c_count,
                             'paid_claims_sar': clean_num(row[2]) or 0.0,
-                            'paid_claims_vat_sar': clean_num(row[3]) or 0.0
+                            'paid_claims_vat_sar': clean_num(row[3]) or 0.0,
+                            'created_at': timestamp
                         })
 
         # 3. Top Providers
@@ -189,7 +217,8 @@ def parse_claims_report(uploaded_file, session_id):
                             'provider_name': str(row[1]).strip(),
                             'claims_count': c_count,
                             'paid_claims_sar': clean_num(row[3]) or 0.0,
-                            'paid_claims_vat_sar': clean_num(row[4]) or 0.0
+                            'paid_claims_vat_sar': clean_num(row[4]) or 0.0,
+                            'created_at': timestamp
                         })
 
     elif fname.endswith('.pdf'):
@@ -207,7 +236,8 @@ def parse_claims_report(uploaded_file, session_id):
                         'active_lives': clean_num(match.group(2)) or 0.0,
                         'claims_count': clean_num(match.group(3)) or 0.0,
                         'paid_claims_sar': clean_num(match.group(4)) or 0.0,
-                        'paid_claims_vat_sar': clean_num(match.group(5)) or 0.0
+                        'paid_claims_vat_sar': clean_num(match.group(5)) or 0.0,
+                        'created_at': timestamp
                     })
 
     return (
@@ -221,7 +251,11 @@ st.caption(t['subtitle'])
 
 uploaded = st.file_uploader(t['uploader_label'], type=["xlsx", "xls", "pdf"])
 
-if uploaded:
+# إدارة حالة الجلسة في الذاكرة التفاعلية
+if 'active_session' not in st.session_state:
+    st.session_state.active_session = None
+
+if uploaded and not st.session_state.active_session:
     session_id = generate_session_id()
     with st.spinner(t['processing']):
         df_monthly, df_benefits, df_providers = parse_claims_report(uploaded, session_id)
@@ -230,33 +264,55 @@ if uploaded:
             st.error(t['error_parse'])
         else:
             try:
-                # الحقن البرمجي المباشر في Google Sheets
+                # الحقن المباشر في قاعدة البيانات
                 append_to_sheets(df_monthly, df_benefits, df_providers)
+                st.session_state.active_session = session_id
                 
-                # تمرير معلمات العزل للمصادر الثلاثة
-                params = {
-                    "ds0.p_session_id": session_id,
-                    "ds1.p_session_id": session_id,
-                    "ds2.p_session_id": session_id
-                }
-                encoded_params = urllib.parse.quote(str(params).replace("'", '"'))
-                looker_url = f"{LOOKER_STUDIO_BASE_URL}?params={encoded_params}"
-                
-                st.success(f"{t['success_msg']} **{session_id}**")
-                st.link_button(t['btn_dashboard'], looker_url, type="primary")
-                
-                # نسخة احتياطية مسطحة
+                # إعداد النسخة الاحتياطية
                 excel_buffer = io.BytesIO()
                 with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                     df_monthly.to_excel(writer, sheet_name='Monthly_Performance', index=False)
                     df_benefits.to_excel(writer, sheet_name='Benefits_Breakdown', index=False)
                     df_providers.to_excel(writer, sheet_name='Top_Providers', index=False)
+                st.session_state.backup_data = excel_buffer.getvalue()
                 
-                st.download_button(
-                    label=t['btn_download'],
-                    data=excel_buffer.getvalue(),
-                    file_name=f"Clean_Claims_{session_id}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
             except Exception as e:
                 st.error(f"{t['error_api']} ({str(e)})")
+
+if st.session_state.active_session:
+    sid = st.session_state.active_session
+    
+    # تجهيز رابط Looker Studio مع تمرير المعلمات
+    params = {
+        "ds0.p_session_id": sid,
+        "ds1.p_session_id": sid,
+        "ds2.p_session_id": sid
+    }
+    encoded_params = urllib.parse.quote(str(params).replace("'", '"'))
+    looker_url = f"{LOOKER_STUDIO_BASE_URL}?params={encoded_params}"
+    
+    st.success(f"{t['success_msg']} **{sid}**")
+    
+    # 1. زر فتح اللوحة
+    st.link_button(t['btn_dashboard'], looker_url, type="primary")
+    
+    # 2. زر تنزيل النسخة المسطحة
+    if 'backup_data' in st.session_state:
+        st.download_button(
+            label=t['btn_download'],
+            data=st.session_state.backup_data,
+            file_name=f"Clean_Claims_{sid}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    
+    st.divider()
+    
+    # 3. زر الإنهاء والحذف الفوري
+    if st.button(t['btn_purge'], type="secondary"):
+        with st.spinner(t['purging_msg']):
+            delete_session_data(sid)
+            st.session_state.active_session = None
+            if 'backup_data' in st.session_state:
+                del st.session_state.backup_data
+            st.success(t['purge_success'])
+            st.rerun()
