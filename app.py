@@ -6,13 +6,50 @@ import streamlit as st
 import pandas as pd
 import pdfplumber
 
+# ضبط الصفحة
 st.set_page_config(
-    page_title="Claims Experience Ingestor",
+    page_title="Claims Experience Ingestor | استيعاب تقارير المطالبات",
     page_icon="🛡️",
     layout="centered"
 )
 
-# رابط لوحة Looker Studio الأساسية (يتم استبدال المعرف بالرابط الفعلي لاحقاً)
+# قاموس اللغات المهني
+TEXTS = {
+    "ar": {
+        "title": "📤 استيعاب وتحليل تقرير تجربة المطالبات",
+        "subtitle": "الأنظمة المدعومة: تقارير هيئة التأمين بصيغة Excel أو PDF. معالجة معزولة ومحمية بالكامل.",
+        "uploader_label": "اختر ملف تقرير المطالبات للبدء بالتحليل اللحظي:",
+        "processing": "جارٍ تفكيك وتسطيح البيانات وعزل الجلسة...",
+        "error_parse": "تعذر التعرف على جداول التقرير. يرجى التأكد من رفع التقرير المعتمد من الهيئة.",
+        "success_msg": "تمت معالجة البيانات بنجاح! رمز جلستك المعزولة:",
+        "btn_dashboard": "🚀 فتح لوحة التحليل والتفاوض الخاصة بك",
+        "btn_download": "📥 تحميل البيانات المسطحة النظيفة (Excel)",
+        "sec_lang": "اللغة / Language"
+    },
+    "en": {
+        "title": "📤 Claims Experience Ingestor & Intelligence",
+        "subtitle": "Supported formats: Insurance Authority standardized Excel or PDF reports. Fully session-isolated.",
+        "uploader_label": "Upload Claims Experience report to start real-time analysis:",
+        "processing": "Parsing, standardizing data, and isolating negotiation session...",
+        "error_parse": "Failed to parse standardized tables. Please ensure the official Insurance Authority format is uploaded.",
+        "success_msg": "Data successfully processed! Isolated Session ID:",
+        "btn_dashboard": "🚀 Launch Negotiation & Analysis Dashboard",
+        "btn_download": "📥 Download Clean Standardized Data (Excel)",
+        "sec_lang": "Language / اللغة"
+    }
+}
+
+# اختيار اللغة من الشريط الجانبي
+with st.sidebar:
+    lang_choice = st.radio(
+        "Interface Language / لغة الواجهة",
+        options=["العربية", "English"],
+        index=0
+    )
+    lang = "ar" if lang_choice == "العربية" else "en"
+    t = TEXTS[lang]
+
+# رابط لوحة Looker Studio الأساسية
 LOOKER_STUDIO_BASE_URL = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47/page/1f97F"
 
 def generate_session_id():
@@ -36,93 +73,96 @@ def parse_claims_report(uploaded_file, session_id):
     if fname.endswith(('.xlsx', '.xls')):
         xls = pd.ExcelFile(uploaded_file)
         
-        # 1. قراءة بيانات الأداء الشهري (Monthly Claims)
-        df_mc = pd.read_excel(xls, sheet_name='Monthly Claims', header=None)
-        class_tier = str(df_mc.iloc[5, 1]) if pd.notna(df_mc.iloc[5, 1]) else "Class A"
-        
-        curr_year = None
-        for _, row in df_mc.iterrows():
-            val0 = str(row[0]).strip()
-            if "2 Years Prior" in val0:
-                curr_year = "PY-1"
-                continue
-            elif "Prior Policy Year" in val0:
-                curr_year = "PY"
-                continue
-            elif "Last Policy Year" in val0 or "Current" in val0:
-                curr_year = "CY"
-                continue
+        # 1. الأداء الشهري (Monthly Claims)
+        if 'Monthly Claims' in xls.sheet_names:
+            df_mc = pd.read_excel(xls, sheet_name='Monthly Claims', header=None)
+            class_tier = str(df_mc.iloc[5, 1]) if pd.notna(df_mc.iloc[5, 1]) else "Class A"
             
-            if re.match(r'^\d{6}$', val0) and curr_year:
-                c_count = clean_num(row[2])
-                if c_count is not None:
-                    monthly_rows.append({
-                        'session_id': session_id,
-                        'class_tier': class_tier,
-                        'policy_year': curr_year,
-                        'month_code': val0,
-                        'active_lives': clean_num(row[1]) or 0.0,
-                        'claims_count': c_count,
-                        'paid_claims_sar': clean_num(row[3]) or 0.0,
-                        'paid_claims_vat_sar': clean_num(row[4]) or 0.0
-                    })
+            curr_year = None
+            for _, row in df_mc.iterrows():
+                val0 = str(row[0]).strip()
+                if "2 Years Prior" in val0:
+                    curr_year = "PY-1"
+                    continue
+                elif "Prior Policy Year" in val0:
+                    curr_year = "PY"
+                    continue
+                elif "Last Policy Year" in val0 or "Current" in val0:
+                    curr_year = "CY"
+                    continue
+                
+                if re.match(r'^\d{6}$', val0) and curr_year:
+                    c_count = clean_num(row[2])
+                    if c_count is not None:
+                        monthly_rows.append({
+                            'session_id': session_id,
+                            'class_tier': class_tier,
+                            'policy_year': curr_year,
+                            'month_code': val0,
+                            'active_lives': clean_num(row[1]) or 0.0,
+                            'claims_count': c_count,
+                            'paid_claims_sar': clean_num(row[3]) or 0.0,
+                            'paid_claims_vat_sar': clean_num(row[4]) or 0.0
+                        })
         
-        # 2. قراءة تشريح المنافع (Breakdown by Benefit)
-        df_bb = pd.read_excel(xls, sheet_name='Breakdown by Benefit', header=None)
-        curr_year = None
-        for _, row in df_bb.iterrows():
-            val0 = str(row[0]).strip()
-            if "2 Years Prior" in val0:
-                curr_year = "PY-1"
-                continue
-            elif "Prior Policy Year" in val0:
-                curr_year = "PY"
-                continue
-            elif "Last Policy Year" in val0 or "Current" in val0:
-                curr_year = "CY"
-                continue
-            
-            if curr_year and "Overall" not in val0 and "Monthly Claims" not in val0:
-                c_count = clean_num(row[1])
-                if c_count is not None:
-                    benefits_rows.append({
-                        'session_id': session_id,
-                        'class_tier': class_tier,
-                        'policy_year': curr_year,
-                        'benefit_name': val0,
-                        'claims_count': c_count,
-                        'paid_claims_sar': clean_num(row[2]) or 0.0,
-                        'paid_claims_vat_sar': clean_num(row[3]) or 0.0
-                    })
+        # 2. تشريح المنافع (Breakdown by Benefit)
+        if 'Breakdown by Benefit' in xls.sheet_names:
+            df_bb = pd.read_excel(xls, sheet_name='Breakdown by Benefit', header=None)
+            curr_year = None
+            for _, row in df_bb.iterrows():
+                val0 = str(row[0]).strip()
+                if "2 Years Prior" in val0:
+                    curr_year = "PY-1"
+                    continue
+                elif "Prior Policy Year" in val0:
+                    curr_year = "PY"
+                    continue
+                elif "Last Policy Year" in val0 or "Current" in val0:
+                    curr_year = "CY"
+                    continue
+                
+                if curr_year and "Overall" not in val0 and "Monthly Claims" not in val0:
+                    c_count = clean_num(row[1])
+                    if c_count is not None:
+                        benefits_rows.append({
+                            'session_id': session_id,
+                            'class_tier': class_tier,
+                            'policy_year': curr_year,
+                            'benefit_name': val0,
+                            'claims_count': c_count,
+                            'paid_claims_sar': clean_num(row[2]) or 0.0,
+                            'paid_claims_vat_sar': clean_num(row[3]) or 0.0
+                        })
 
-        # 3. قراءة مقدمي الخدمة (Top Providers)
-        df_tp = pd.read_excel(xls, sheet_name='Top Providers', header=None)
-        curr_year = None
-        for _, row in df_tp.iterrows():
-            val0 = str(row[0]).strip()
-            if "2 Years Prior" in val0:
-                curr_year = "PY-1"
-                continue
-            elif "Prior Policy Year" in val0:
-                curr_year = "PY"
-                continue
-            elif "Lasr Policy Year" in val0 or "Last Policy Year" in val0:
-                curr_year = "CY"
-                continue
-            
-            if re.match(r'^\d+$', val0) and curr_year:
-                c_count = clean_num(row[2])
-                if c_count is not None:
-                    providers_rows.append({
-                        'session_id': session_id,
-                        'class_tier': class_tier,
-                        'policy_year': curr_year,
-                        'rank': int(val0),
-                        'provider_name': str(row[1]).strip(),
-                        'claims_count': c_count,
-                        'paid_claims_sar': clean_num(row[3]) or 0.0,
-                        'paid_claims_vat_sar': clean_num(row[4]) or 0.0
-                    })
+        # 3. كبار مقدمي الخدمة (Top Providers)
+        if 'Top Providers' in xls.sheet_names:
+            df_tp = pd.read_excel(xls, sheet_name='Top Providers', header=None)
+            curr_year = None
+            for _, row in df_tp.iterrows():
+                val0 = str(row[0]).strip()
+                if "2 Years Prior" in val0:
+                    curr_year = "PY-1"
+                    continue
+                elif "Prior Policy Year" in val0:
+                    curr_year = "PY"
+                    continue
+                elif "Lasr Policy Year" in val0 or "Last Policy Year" in val0:
+                    curr_year = "CY"
+                    continue
+                
+                if re.match(r'^\d+$', val0) and curr_year:
+                    c_count = clean_num(row[2])
+                    if c_count is not None:
+                        providers_rows.append({
+                            'session_id': session_id,
+                            'class_tier': class_tier,
+                            'policy_year': curr_year,
+                            'rank': int(val0),
+                            'provider_name': str(row[1]).strip(),
+                            'claims_count': c_count,
+                            'paid_claims_sar': clean_num(row[3]) or 0.0,
+                            'paid_claims_vat_sar': clean_num(row[4]) or 0.0
+                        })
 
     elif fname.endswith('.pdf'):
         with pdfplumber.open(uploaded_file) as pdf:
@@ -148,30 +188,28 @@ def parse_claims_report(uploaded_file, session_id):
         pd.DataFrame(providers_rows)
     )
 
-# واجهة الاستيعاب والرفع
-st.markdown("### 📤 رفع تقرير تجربة المطالبات (Claims Experience)")
-st.caption("الأنظمة المدعومة: تقارير هيئة التأمين بصيغة Excel أو PDF. المعالجة معزولة ومحمية بالكامل.")
+# العرض التفاعلي
+st.markdown(f"### {t['title']}")
+st.caption(t['subtitle'])
 
-uploaded = st.file_uploader("اختر ملف التقرير للبدء بالتحليل اللحظي:", type=["xlsx", "xls", "pdf"])
+uploaded = st.file_uploader(t['uploader_label'], type=["xlsx", "xls", "pdf"])
 
 if uploaded:
     session_id = generate_session_id()
-    with st.spinner("جارٍ تفكيك وتسطيح البيانات وعزل الجلسة..."):
+    with st.spinner(t['processing']):
         df_monthly, df_benefits, df_providers = parse_claims_report(uploaded, session_id)
         
         if df_monthly.empty:
-            st.error("تعذر التعرف على جداول التقرير. يرجى التأكد من رفع النموذج المعتمد.")
+            st.error(t['error_parse'])
         else:
-            # تجهيز رابط Looker Studio الديناميكي المفلتر بالمعلمة ds0.p_session_id
             params = {"ds0.p_session_id": session_id}
             encoded_params = urllib.parse.quote(str(params).replace("'", '"'))
             looker_url = f"{LOOKER_STUDIO_BASE_URL}?params={encoded_params}"
             
-            st.success(f"تمت معالجة البيانات بنجاح! رمز جلستك المعزولة: **{session_id}**")
+            st.success(f"{t['success_msg']} **{session_id}**")
             
-            st.link_button("🚀 فتح لوحة التحليل والتفاوض الخاصة بك", looker_url, type="primary")
+            st.link_button(t['btn_dashboard'], looker_url, type="primary")
             
-            # تجهيز ملف الإكسل النظيف للتحميل
             excel_buffer = io.BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                 df_monthly.to_excel(writer, sheet_name='Monthly_Performance', index=False)
@@ -179,7 +217,7 @@ if uploaded:
                 df_providers.to_excel(writer, sheet_name='Top_Providers', index=False)
             
             st.download_button(
-                label="📥 تحميل البيانات المسطحة النظيفة (Excel)",
+                label=t['btn_download'],
                 data=excel_buffer.getvalue(),
                 file_name=f"Clean_Claims_{session_id}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
