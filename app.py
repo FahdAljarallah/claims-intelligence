@@ -5,41 +5,44 @@ import urllib.parse
 import streamlit as st
 import pandas as pd
 import pdfplumber
+import gspread
+from google.oauth2.service_account import Credentials
 
-# ضبط الصفحة
 st.set_page_config(
     page_title="Claims Experience Ingestor | استيعاب تقارير المطالبات",
     page_icon="🛡️",
     layout="centered"
 )
 
-# قاموس اللغات المهني
+# قاموس الواجهة المهني
 TEXTS = {
     "ar": {
         "title": "📤 استيعاب وتحليل تقرير تجربة المطالبات",
         "subtitle": "الأنظمة المدعومة: تقارير هيئة التأمين بصيغة Excel أو PDF. معالجة معزولة ومحمية بالكامل.",
         "uploader_label": "اختر ملف تقرير المطالبات للبدء بالتحليل اللحظي:",
-        "processing": "جارٍ تفكيك وتسطيح البيانات وعزل الجلسة...",
+        "processing": "جارٍ استخراج البيانات، عزل الجلسة، وتغذية لوحة التفاوض...",
         "error_parse": "تعذر التعرف على جداول التقرير. يرجى التأكد من رفع التقرير المعتمد من الهيئة.",
-        "success_msg": "تمت معالجة البيانات بنجاح! رمز جلستك المعزولة:",
+        "error_api": "حدث خطأ أثناء تحديث قاعدة البيانات المركزية. يرجى مراجعة الصلاحيات.",
+        "success_msg": "تمت معالجة البيانات وحقنها بنجاح! رمز جلستك المعزولة:",
         "btn_dashboard": "🚀 فتح لوحة التحليل والتفاوض الخاصة بك",
-        "btn_download": "📥 تحميل البيانات المسطحة النظيفة (Excel)",
+        "btn_download": "📥 تحميل نسخة احتياطية مسطحة (Excel)",
         "sec_lang": "اللغة / Language"
     },
     "en": {
         "title": "📤 Claims Experience Ingestor & Intelligence",
         "subtitle": "Supported formats: Insurance Authority standardized Excel or PDF reports. Fully session-isolated.",
         "uploader_label": "Upload Claims Experience report to start real-time analysis:",
-        "processing": "Parsing, standardizing data, and isolating negotiation session...",
+        "processing": "Standardizing data, isolating negotiation session, and updating analytical layer...",
         "error_parse": "Failed to parse standardized tables. Please ensure the official Insurance Authority format is uploaded.",
-        "success_msg": "Data successfully processed! Isolated Session ID:",
+        "error_api": "Error occurred while updating the central repository. Please verify access permissions.",
+        "success_msg": "Data processed and integrated successfully! Isolated Session ID:",
         "btn_dashboard": "🚀 Launch Negotiation & Analysis Dashboard",
-        "btn_download": "📥 Download Clean Standardized Data (Excel)",
+        "btn_download": "📥 Download Clean Backup Data (Excel)",
         "sec_lang": "Language / اللغة"
     }
 }
 
-# اختيار اللغة من الشريط الجانبي
+# اختيار اللغة
 with st.sidebar:
     lang_choice = st.radio(
         "Interface Language / لغة الواجهة",
@@ -49,7 +52,6 @@ with st.sidebar:
     lang = "ar" if lang_choice == "العربية" else "en"
     t = TEXTS[lang]
 
-# رابط لوحة Looker Studio الأساسية
 LOOKER_STUDIO_BASE_URL = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47/page/1f97F"
 
 def generate_session_id():
@@ -64,6 +66,32 @@ def clean_num(val):
     except (ValueError, TypeError):
         return None
 
+def get_gspread_client():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    return gspread.authorize(credentials)
+
+def append_to_sheets(df_monthly, df_benefits, df_providers):
+    client = get_gspread_client()
+    sheet_id = st.secrets["SPREADSHEET_ID"]
+    sh = client.open_by_key(sheet_id)
+    
+    # 1. Monthly_Performance
+    ws_m = sh.worksheet("Monthly_Performance")
+    ws_m.append_rows(df_monthly.values.tolist())
+    
+    # 2. Benefits_Breakdown
+    ws_b = sh.worksheet("Benefits_Breakdown")
+    ws_b.append_rows(df_benefits.values.tolist())
+    
+    # 3. Top_Providers
+    ws_p = sh.worksheet("Top_Providers")
+    ws_p.append_rows(df_providers.values.tolist())
+
 def parse_claims_report(uploaded_file, session_id):
     fname = uploaded_file.name.lower()
     monthly_rows = []
@@ -73,7 +101,7 @@ def parse_claims_report(uploaded_file, session_id):
     if fname.endswith(('.xlsx', '.xls')):
         xls = pd.ExcelFile(uploaded_file)
         
-        # 1. الأداء الشهري (Monthly Claims)
+        # 1. Monthly Claims
         if 'Monthly Claims' in xls.sheet_names:
             df_mc = pd.read_excel(xls, sheet_name='Monthly Claims', header=None)
             class_tier = str(df_mc.iloc[5, 1]) if pd.notna(df_mc.iloc[5, 1]) else "Class A"
@@ -105,7 +133,7 @@ def parse_claims_report(uploaded_file, session_id):
                             'paid_claims_vat_sar': clean_num(row[4]) or 0.0
                         })
         
-        # 2. تشريح المنافع (Breakdown by Benefit)
+        # 2. Breakdown by Benefit
         if 'Breakdown by Benefit' in xls.sheet_names:
             df_bb = pd.read_excel(xls, sheet_name='Breakdown by Benefit', header=None)
             curr_year = None
@@ -134,7 +162,7 @@ def parse_claims_report(uploaded_file, session_id):
                             'paid_claims_vat_sar': clean_num(row[3]) or 0.0
                         })
 
-        # 3. كبار مقدمي الخدمة (Top Providers)
+        # 3. Top Providers
         if 'Top Providers' in xls.sheet_names:
             df_tp = pd.read_excel(xls, sheet_name='Top Providers', header=None)
             curr_year = None
@@ -188,7 +216,6 @@ def parse_claims_report(uploaded_file, session_id):
         pd.DataFrame(providers_rows)
     )
 
-# العرض التفاعلي
 st.markdown(f"### {t['title']}")
 st.caption(t['subtitle'])
 
@@ -202,23 +229,30 @@ if uploaded:
         if df_monthly.empty:
             st.error(t['error_parse'])
         else:
-            params = {"ds0.p_session_id": session_id}
-            encoded_params = urllib.parse.quote(str(params).replace("'", '"'))
-            looker_url = f"{LOOKER_STUDIO_BASE_URL}?params={encoded_params}"
-            
-            st.success(f"{t['success_msg']} **{session_id}**")
-            
-            st.link_button(t['btn_dashboard'], looker_url, type="primary")
-            
-            excel_buffer = io.BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                df_monthly.to_excel(writer, sheet_name='Monthly_Performance', index=False)
-                df_benefits.to_excel(writer, sheet_name='Benefits_Breakdown', index=False)
-                df_providers.to_excel(writer, sheet_name='Top_Providers', index=False)
-            
-            st.download_button(
-                label=t['btn_download'],
-                data=excel_buffer.getvalue(),
-                file_name=f"Clean_Claims_{session_id}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            try:
+                # الحقن البرمجي المباشر في Google Sheets
+                append_to_sheets(df_monthly, df_benefits, df_providers)
+                
+                params = {"ds0.p_session_id": session_id}
+                encoded_params = urllib.parse.quote(str(params).replace("'", '"'))
+                looker_url = f"{LOOKER_STUDIO_BASE_URL}?params={encoded_params}"
+                
+                st.success(f"{t['success_msg']} **{session_id}**")
+                
+                st.link_button(t['btn_dashboard'], looker_url, type="primary")
+                
+                # خيار حفظ نسخة مسطحة كاحتياط
+                excel_buffer = io.BytesIO()
+                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                    df_monthly.to_excel(writer, sheet_name='Monthly_Performance', index=False)
+                    df_benefits.to_excel(writer, sheet_name='Benefits_Breakdown', index=False)
+                    df_providers.to_excel(writer, sheet_name='Top_Providers', index=False)
+                
+                st.download_button(
+                    label=t['btn_download'],
+                    data=excel_buffer.getvalue(),
+                    file_name=f"Clean_Claims_{session_id}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            except Exception as e:
+                st.error(f"{t['error_api']} ({str(e)})")
