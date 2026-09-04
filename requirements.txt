@@ -1,5 +1,6 @@
 streamlit
 pandas
 openpyxl
-plotly
 pdfplumber
+gspread
+google-auth
