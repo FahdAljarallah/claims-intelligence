@@ -149,7 +149,7 @@ if uploaded:
             st.error("تعذر التعرف على جداول التقرير. يرجى التأكد من رفع النموذج المعتمد.")
         else:
             # تجهيز رابط Looker Studio الديناميكي المفلتر بالـ session_id
-            params = {"ds0.session_id": session_id}
+            params = {"ds0.p_session_id": session_id}
             encoded_params = urllib.parse.quote(str(params).replace("'", '"'))
             looker_url = f"{LOOKER_STUDIO_BASE_URL}?params={encoded_params}"
             
