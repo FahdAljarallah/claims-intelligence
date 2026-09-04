@@ -233,7 +233,11 @@ if uploaded:
                 # الحقن البرمجي المباشر في Google Sheets
                 append_to_sheets(df_monthly, df_benefits, df_providers)
                 
-                params = {"ds0.p_session_id": session_id}
+               params = {
+            "ds0.p_session_id": session_id,
+            "ds1.p_session_id": session_id,
+            "ds2.p_session_id": session_id
+        }
                 encoded_params = urllib.parse.quote(str(params).replace("'", '"'))
                 looker_url = f"{LOOKER_STUDIO_BASE_URL}?params={encoded_params}"
                 
