@@ -1,12 +1,14 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
+from datetime import datetime
 import uuid
 import json
+import io
 import urllib.parse
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
+# 1. تهيئة الصفحة
 st.set_page_config(
     page_title="Claims Intelligence Portal",
     page_icon="📊",
@@ -17,6 +19,7 @@ PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
 LOOKER_REPORT_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47/page/1f97F"
 
+# 2. المصادقة والاتصال السحابي
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -33,46 +36,38 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-# دالة تنظيف آمنة لا تتعثر بالنصوص أو الترويسات
-def prepare_df_for_bq(df):
+# دالة رفع دفعي متينة باستخدام تدفق بايتات CSV مؤمن
+def upload_df_as_csv_bytes(client, df, table_name):
     if df.empty:
-        return df
-    df = df.copy()
+        return
     
-    for col in df.columns:
-        # إذا كان العمود معرفاً كـ datetime مسبقاً نتركه أو ننسقه
-        if pd.api.types.is_datetime64_any_dtype(df[col]):
-            df[col] = pd.to_datetime(df[col])
-        else:
-            # فحص ما إذا كان اسم العمود يوحي بالتاريخ فقط (لتجنب مساس أعمدة الأسماء والمزودين)
-            col_lower = str(col).lower()
-            if any(k in col_lower for k in ['date', 'month', 'year', 'created_at', 'تاريخ', 'شهر']):
-                try:
-                    df[col] = pd.to_datetime(df[col], errors='ignore')
-                except Exception:
-                    pass
-    return df
+    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{table_name}"
+    
+    # تنظيف أسماء الأعمدة لمنع أي رموز خاصة ترفضها BigQuery
+    df_clean = df.copy()
+    df_clean.columns = [str(c).strip().replace(" ", "_").replace("/", "_").replace("-", "_") for c in df_clean.columns]
+    
+    # تحويل الجدول إلى تدفق نصي ثم بايتات utf-8 نقية
+    csv_buffer = io.StringIO()
+    df_clean.to_csv(csv_buffer, index=False)
+    csv_bytes = io.BytesIO(csv_buffer.getvalue().encode('utf-8'))
+    
+    job_config = bigquery.LoadJobConfig(
+        source_format=bigquery.SourceFormat.CSV,
+        skip_leading_rows=1,
+        autodetect=True,
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED
+    )
+    
+    job = client.load_table_from_file(csv_bytes, table_ref, job_config=job_config)
+    job.result()
 
 def append_to_bigquery_free_tier(df_monthly, df_benefits, df_providers):
     client = get_bq_client()
-    
-    job_config = bigquery.LoadJobConfig(
-        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-        create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
-        autodetect=True
-    )
-
-    targets = [
-        (prepare_df_for_bq(df_monthly), "monthly_performance"),
-        (prepare_df_for_bq(df_benefits), "benefits_breakdown"),
-        (prepare_df_for_bq(df_providers), "top_providers")
-    ]
-
-    for df, table_name in targets:
-        if not df.empty:
-            table_ref = f"{PROJECT_ID}.{DATASET_ID}.{table_name}"
-            job = client.load_table_from_dataframe(df, table_ref, job_config=job_config)
-            job.result()
+    upload_df_as_csv_bytes(client, df_monthly, "monthly_performance")
+    upload_df_as_csv_bytes(client, df_benefits, "benefits_breakdown")
+    upload_df_as_csv_bytes(client, df_providers, "top_providers")
 
 def delete_session_data(target_session_id):
     client = get_bq_client()
@@ -84,6 +79,7 @@ def delete_session_data(target_session_id):
         )
         client.query(query, job_config=job_config).result()
 
+# 3. نصوص الواجهة
 i18n = {
     "AR": {
         "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
@@ -159,6 +155,7 @@ if current_premium:
 
 uploaded_file = st.file_uploader(t["upload_label"], type=["xlsx", "xls", "csv"])
 
+# 4. المعالجة وتغذية المعلمات
 if uploaded_file:
     if st.button(t["btn_process"]):
         if not current_premium or not total_members or not inception_date:
@@ -168,7 +165,7 @@ if uploaded_file:
                 try:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
-                    now_ts = pd.Timestamp.now(tz='UTC')
+                    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
                     if uploaded_file.name.endswith(('xlsx', 'xls')):
                         excel_dict = pd.read_excel(uploaded_file, sheet_name=None)
@@ -183,9 +180,10 @@ if uploaded_file:
 
                     for df in [df_m, df_b, df_p]:
                         if not df.empty:
-                            df['session_id'] = session_id
-                            df['created_at'] = now_ts
+                            df['session_id'] = str(session_id)
+                            df['created_at'] = str(now_str)
 
+                    # الرفع المتين كـ CSV Bytes
                     append_to_bigquery_free_tier(df_m, df_b, df_p)
 
                     url_params = {
@@ -206,6 +204,7 @@ if uploaded_file:
                 except Exception as e:
                     st.error(f"حدث خطأ أثناء معالجة وضخ الملف: {str(e)}")
 
+# 5. تطهير البيانات
 if "active_session_id" in st.session_state:
     st.divider()
     st.subheader(t["session_mgmt"])
