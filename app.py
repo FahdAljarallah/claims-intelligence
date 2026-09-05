@@ -7,7 +7,6 @@ import urllib.parse
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
-# 1. إعدادات الصفحة
 st.set_page_config(
     page_title="Claims Intelligence Portal",
     page_icon="📊",
@@ -18,7 +17,6 @@ PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
 LOOKER_REPORT_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47/page/1f97F"
 
-# 2. إدارة المصادقة والاتصال بـ BigQuery
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -35,19 +33,26 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-# دالة تهيئة وتطهير الأعمدة قبل الضخ
+# دالة تنظيف آمنة لا تتعثر بالنصوص أو الترويسات
 def prepare_df_for_bq(df):
     if df.empty:
         return df
     df = df.copy()
+    
     for col in df.columns:
+        # إذا كان العمود معرفاً كـ datetime مسبقاً نتركه أو ننسقه
         if pd.api.types.is_datetime64_any_dtype(df[col]):
             df[col] = pd.to_datetime(df[col])
-        elif df[col].apply(lambda x: isinstance(x, (datetime, date))).any():
-            df[col] = pd.to_datetime(df[col])
+        else:
+            # فحص ما إذا كان اسم العمود يوحي بالتاريخ فقط (لتجنب مساس أعمدة الأسماء والمزودين)
+            col_lower = str(col).lower()
+            if any(k in col_lower for k in ['date', 'month', 'year', 'created_at', 'تاريخ', 'شهر']):
+                try:
+                    df[col] = pd.to_datetime(df[col], errors='ignore')
+                except Exception:
+                    pass
     return df
 
-# الرفع الدفعي المجاني مع إنشاء الجداول تلقائياً إن لم تكن موجودة
 def append_to_bigquery_free_tier(df_monthly, df_benefits, df_providers):
     client = get_bq_client()
     
@@ -79,7 +84,6 @@ def delete_session_data(target_session_id):
         )
         client.query(query, job_config=job_config).result()
 
-# 3. نصوص الواجهة ثنائية اللغة
 i18n = {
     "AR": {
         "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
@@ -124,7 +128,6 @@ t = i18n[lang_code]
 st.title(t["title"])
 st.markdown(t["subtitle"])
 
-# 4. مدخلات المعلمات التشغيلية (فارغة مسبقاً)
 col_date, col_members = st.columns(2)
 with col_date:
     inception_date = st.date_input(t["date_label"], value=None)
@@ -156,7 +159,6 @@ if current_premium:
 
 uploaded_file = st.file_uploader(t["upload_label"], type=["xlsx", "xls", "csv"])
 
-# 5. معالجة الملف والضخ التلقائي
 if uploaded_file:
     if st.button(t["btn_process"]):
         if not current_premium or not total_members or not inception_date:
@@ -204,7 +206,6 @@ if uploaded_file:
                 except Exception as e:
                     st.error(f"حدث خطأ أثناء معالجة وضخ الملف: {str(e)}")
 
-# 6. قسم تطهير وحوكمة البيانات
 if "active_session_id" in st.session_state:
     st.divider()
     st.subheader(t["session_mgmt"])
