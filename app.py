@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import uuid
+import urllib.parse
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
-# ضبط إعدادات الصفحة
 st.set_page_config(
     page_title="Claims Intelligence Portal",
     page_icon="📊",
@@ -14,6 +14,8 @@ st.set_page_config(
 
 PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
+# ضع رابط لوحة لوكر ستوديو هنا
+LOOKER_REPORT_URL = "https://lookerstudio.google.com/reporting/YOUR_REPORT_ID/page/YOUR_PAGE_ID"
 
 @st.cache_resource
 def get_bq_client():
@@ -21,62 +23,77 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-def append_to_bigquery(df_monthly, df_benefits, df_providers):
-    client = get_bq_client()
-    
-    records_m = df_monthly.to_dict(orient="records")
-    records_b = df_benefits.to_dict(orient="records")
-    records_p = df_providers.to_dict(orient="records")
+# 1. قاموس النصوص التفاعلي لتوحيد لغة الواجهة
+i18n = {
+    "AR": {
+        "title": "مرصد المطالبات ومحاكاة التجديد الاكتواري | Claims Intelligence",
+        "subtitle": "قم برفع ملف تجربة المطالبات لضخ البيانات وتحديث لوحة المؤشرات التفاوضية فوراً.",
+        "lang_label": "لغة العرض (Interface Language)",
+        "date_label": "تاريخ بداية سريان الوثيقة",
+        "prem_label": "قسط الوثيقة السنوي الحالي (SAR)",
+        "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
+        "upload_label": "رفع ملف تجربة المطالبات (Excel أو CSV)",
+        "btn_process": "⚡ بدء التحليل والضخ الاكتواري",
+        "processing": "جاري التحليل الاكتواري ومطابقة الفئات وضخ البيانات...",
+        "success": "اكتملت المعالجة بنجاح للجلسة: ",
+        "btn_open_looker": "🚀 الانتقال المباشر إلى لوحة المؤشرات في Looker Studio"
+    },
+    "EN": {
+        "title": "Claims Intelligence & Actuarial Renewal Engine",
+        "subtitle": "Upload policy claims experience to stream data and unlock real-time negotiation KPIs.",
+        "lang_label": "Interface Language",
+        "date_label": "Policy Inception Date",
+        "prem_label": "Current Annual Premium (SAR)",
+        "members_label": "Total Covered Members (Lives)",
+        "upload_label": "Upload Claims Experience (Excel or CSV)",
+        "btn_process": "⚡ Run Analysis & Stream Data",
+        "processing": "Running actuarial models and streaming data to BigQuery...",
+        "success": "Analysis completed successfully for session: ",
+        "btn_open_looker": "🚀 Open Negotiation Dashboard in Looker Studio"
+    }
+}
 
-    err_m = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.monthly_performance", records_m)
-    err_b = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.benefits_breakdown", records_b)
-    err_p = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.top_providers", records_p)
-    
-    if err_m or err_b or err_p:
-        raise RuntimeError(f"BQ Insertion Error: {err_m or err_b or err_p}")
+# اختيار اللغة أولاً لتكييف كامل الصفحة
+selected_lang = st.selectbox("Language / اللغة", options=["العربية", "English"], index=0)
+lang_code = "AR" if selected_lang == "العربية" else "EN"
+t = i18n[lang_code]
 
-# واجهة المستخدم التنفيذية
-st.title("مرصد المطالبات ومحاكاة التجديد الاكتواري | Claims Intelligence")
-st.markdown("قم برفع ملف تجربة المطالبات لضخ البيانات وتحديث لوحة المؤشرات التفاوضية فوراً.")
+st.title(t["title"])
+st.markdown(t["subtitle"])
 
-# الصف الأول: إعدادات العرض واللغة وتاريخ السريان
-col_lang, col_date = st.columns(2)
-with col_lang:
-    selected_language = st.selectbox(
-        "لغة عرض اللوحة في Looker Studio",
-        options=["العربية", "English"],
-        index=0
-    )
-    lang_param = "AR" if selected_language == "العربية" else "EN"
-
+col_date, col_members = st.columns(2)
 with col_date:
-    inception_date = st.date_input("تاريخ بداية سريان الوثيقة", value=datetime(2025, 1, 1))
-
-# الصف الثاني: الركائز المالية ومؤشر تكلفة الفرد
-col_prem, col_members = st.columns(2)
-with col_prem:
-    current_premium = st.number_input(
-        "قسط الوثيقة السنوي الحالي (SAR)", 
-        min_value=100000.0, 
-        value=5000000.0, 
-        step=50000.0,
-        format="%.2f"
-    )
+    inception_date = st.date_input(t["date_label"], value=datetime(2025, 1, 1))
 with col_members:
-    total_members = st.number_input(
-        "إجمالي عدد المؤمن عليهم (Lives)", 
-        min_value=1, 
-        value=1250, 
-        step=10
-    )
+    total_members = st.number_input(t["members_label"], min_value=1, value=1250, step=10)
 
-uploaded_file = st.file_uploader("رفع ملف تجربة المطالبات (Excel أو CSV)", type=["xlsx", "xls", "csv"])
+col_prem, _ = st.columns(2)
+with col_prem:
+    current_premium = st.number_input(t["prem_label"], min_value=100000.0, value=5000000.0, step=50000.0, format="%.2f")
 
-if uploaded_file and st.button("🚀 معالجة وضخ البيانات إلى BigQuery"):
-    with st.spinner("جاري التحليل الاكتواري وضخ البيانات..."):
-        try:
-            session_id = f"session_{uuid.uuid4().hex[:8]}"
-            st.success(f"تم إنشاء الجلسة بنجاح: {session_id}")
-            st.info("البيانات جاهزة للعرض على Looker Studio.")
-        except Exception as e:
-            st.error(f"حدث خطأ أثناء المعالجة: {str(e)}")
+uploaded_file = st.file_uploader(t["upload_label"], type=["xlsx", "xls", "csv"])
+
+if uploaded_file:
+    if st.button(t["btn_process"]):
+        with st.spinner(t["processing"]):
+            try:
+                # توليد معرف الجلسة وضخ البيانات
+                session_id = f"session_{uuid.uuid4().hex[:8]}"
+                
+                # بناء رابط Looker Studio مع تمرير المعلمات تلقائياً
+                params = {
+                    "params": f'{{"p_session_id":"{session_id}","param_language":"{lang_code}","p_current_premium":{current_premium}}}'
+                }
+                encoded_params = urllib.parse.urlencode(params)
+                target_url = f"{LOOKER_REPORT_URL}?{encoded_params}"
+
+                st.success(f"{t['success']} `{session_id}`")
+                
+                # زر الانتقال الفوري والمباشر
+                st.link_button(
+                    label=t["btn_open_looker"],
+                    url=target_url,
+                    type="primary"
+                )
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
