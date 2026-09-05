@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
+from datetime import datetime
 import uuid
 import json
 import urllib.parse
@@ -33,40 +33,31 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-# دالة تحويل الأعمدة والجداول إلى صياغة JSON آمنة ومقبولة سحابياً
-def prepare_df_for_bq(df):
-    if df.empty:
-        return df
-    df = df.copy()
-    for col in df.columns:
-        # تحويل التواريخ والـ Timestamps إلى نصوص ISO
-        if pd.api.types.is_datetime64_any_dtype(df[col]):
-            df[col] = df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-        elif df[col].apply(lambda x: isinstance(x, (datetime, date))).any():
-            df[col] = df[col].apply(lambda x: x.isoformat() if isinstance(x, (datetime, date)) else x)
-    # استبدال القيم المفقودة بـ None لكي تتحول إلى null سليم في JSON
-    return df.where(pd.notnull(df), None)
-
-def append_to_bigquery(df_monthly, df_benefits, df_providers):
+# استخدام مهام التحميل المجانية بالكامل في Free Tier
+def append_to_bigquery_free_tier(df_monthly, df_benefits, df_providers):
     client = get_bq_client()
     
+    job_config = bigquery.LoadJobConfig(
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+    )
+
     if not df_monthly.empty:
-        records_m = prepare_df_for_bq(df_monthly).to_dict(orient="records")
-        err_m = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.monthly_performance", records_m)
-        if err_m:
-            raise RuntimeError(f"خطأ في ضخ بيانات الأداء الشهري: {err_m}")
-            
+        job = client.load_table_from_dataframe(
+            df_monthly, f"{PROJECT_ID}.{DATASET_ID}.monthly_performance", job_config=job_config
+        )
+        job.result()  # انتظار اكتمال الرفع المجاني السريع
+
     if not df_benefits.empty:
-        records_b = prepare_df_for_bq(df_benefits).to_dict(orient="records")
-        err_b = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.benefits_breakdown", records_b)
-        if err_b:
-            raise RuntimeError(f"خطأ في ضخ تفاصيل المنافع: {err_b}")
-            
+        job = client.load_table_from_dataframe(
+            df_benefits, f"{PROJECT_ID}.{DATASET_ID}.benefits_breakdown", job_config=job_config
+        )
+        job.result()
+
     if not df_providers.empty:
-        records_p = prepare_df_for_bq(df_providers).to_dict(orient="records")
-        err_p = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.top_providers", records_p)
-        if err_p:
-            raise RuntimeError(f"خطأ في ضخ مقدمي الخدمة: {err_p}")
+        job = client.load_table_from_dataframe(
+            df_providers, f"{PROJECT_ID}.{DATASET_ID}.top_providers", job_config=job_config
+        )
+        job.result()
 
 def delete_session_data(target_session_id):
     client = get_bq_client()
@@ -162,7 +153,7 @@ if uploaded_file:
                 try:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
-                    now_iso = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+                    now_iso = datetime.utcnow()
 
                     if uploaded_file.name.endswith(('xlsx', 'xls')):
                         excel_dict = pd.read_excel(uploaded_file, sheet_name=None)
@@ -175,13 +166,14 @@ if uploaded_file:
                         df_raw = pd.read_csv(uploaded_file)
                         df_m, df_b, df_p = df_raw, pd.DataFrame(), pd.DataFrame()
 
+                    # تطعيم البيانات بالمعرفات التشغيلية
                     for df in [df_m, df_b, df_p]:
                         if not df.empty:
                             df['session_id'] = session_id
                             df['created_at'] = now_iso
 
-                    # الضخ الآمن بعد معالجة التواريخ
-                    append_to_bigquery(df_m, df_b, df_p)
+                    # التحميل المجاني المتوافق مع قيود الحساب
+                    append_to_bigquery_free_tier(df_m, df_b, df_p)
 
                     url_params = {
                         "ds14.p_session_id": session_id,
