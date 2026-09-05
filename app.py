@@ -37,24 +37,49 @@ EXACT_BQ_COLUMNS = [
     'paid_claims_sar', 'paid_claims_vat_sar'
 ]
 
-# قاموس موسع وشامل يطابق مصطلحات السوق السعودي
 COLUMN_MAPPING = {
-    'policy_year': ['policy_year', 'year', 'سنة', 'السنة', 'policy year', 'uw_year'],
-    'month_code': ['month_code', 'month', 'شهر', 'الشهر', 'period', 'incurred_month', 'treatment_month', 'date'],
-    'month_weight': ['month_weight', 'month_no', 'ترتيب', 'm_no', 'seq'],
-    'class_tier': ['class_tier', 'class', 'فئة', 'tier', 'category', 'الفئة'],
-    'active_lives': ['active_lives', 'lives', 'members', 'الأعضاء', 'المؤمن عليهم', 'census', 'headcount', 'enrolled'],
-    'claims_count': ['claims_count', 'count', 'عدد المطالبات', 'مطالبات', 'claims', 'utilization_count', 'no_of_claims'],
+    'policy_year': ['policy_year', 'year', 'سنة', 'السنة', 'uw_year'],
+    'month_code': ['month_code', 'month', 'شهر', 'الشهر', 'period', 'incurred_month', 'date'],
+    'month_weight': ['month_weight', 'month_no', 'ترتيب', 'm_no'],
+    'class_tier': ['class_tier', 'class', 'فئة', 'tier', 'category'],
+    'active_lives': ['active_lives', 'lives', 'members', 'الأعضاء', 'المؤمن عليهم', 'census', 'headcount'],
+    'claims_count': ['claims_count', 'count', 'عدد المطالبات', 'مطالبات', 'claims', 'utilization'],
     'paid_claims_sar': [
         'paid_claims_sar', 'net_paid', 'paid', 'claim_amount', 'المطالبات', 'المبلغ', 
-        'paid_amount', 'net_incurred', 'incurred', 'settled_amount', 'claims_paid', 'المطالبات المسددة'
+        'paid_amount', 'net_incurred', 'incurred', 'settled_amount', 'claims_paid'
     ],
-    'paid_claims_vat_sar': ['paid_claims_vat_sar', 'gross_paid', 'vat', 'الإجمالي', 'total_with_vat', 'gross_amount']
+    'paid_claims_vat_sar': ['paid_claims_vat_sar', 'gross_paid', 'vat', 'الإجمالي', 'total_with_vat']
 }
+
+# دالة ذكية لتخطي سطور ترويسة تقارير التأمين واكتشاف بداية الجدول
+def find_table_header_and_read(file_obj):
+    if file_obj.name.endswith(('xlsx', 'xls')):
+        excel_data = pd.read_excel(file_obj, sheet_name=None, header=None)
+        # البحث في الورقة التي تحتوي على كلمة Monthly أو الورقة الأولى
+        target_sheet = list(excel_data.keys())[0]
+        for name in excel_data.keys():
+            if 'month' in name.lower():
+                target_sheet = name
+                break
+        raw_df = excel_data[target_sheet]
+    else:
+        raw_df = pd.read_csv(file_obj, header=None)
+
+    # البحث عن السطر الذي يحتوي على أسماء الحقول التشغيلية
+    header_idx = 0
+    for idx, row in raw_df.head(20).iterrows():
+        row_str = " ".join([str(val).lower() for val in row.values])
+        if any(k in row_str for k in ['month', 'paid', 'claim', 'incurred', 'شـهر', 'مطالب']):
+            header_idx = idx
+            break
+
+    # إعادة قراءة البيانات مع اعتماد السطر المكتشف كترويسة
+    raw_df.columns = raw_df.iloc[header_idx]
+    df_data = raw_df.iloc[header_idx + 1:].copy().dropna(how='all')
+    return df_data
 
 def map_and_clean_df(df, session_id, default_members):
     df_clean = df.copy()
-    # تنظيف وتوحيد نصوص الأعمدة للبحث
     cleaned_col_lookup = {str(c).strip().lower().replace(" ", "_").replace("/", "_").replace("-", "_"): c for c in df_clean.columns}
     
     mapped_data = pd.DataFrame()
@@ -80,12 +105,10 @@ def map_and_clean_df(df, session_id, default_members):
             else:
                 mapped_data[target_col] = "General"
 
-    # تحويل الأرقام وتنظيف الفواصل والرموز
     for num_col in ['paid_claims_sar', 'paid_claims_vat_sar', 'active_lives', 'claims_count', 'month_weight']:
         mapped_data[num_col] = mapped_data[num_col].astype(str).str.replace(',', '').str.replace('SAR', '').str.strip()
         mapped_data[num_col] = pd.to_numeric(mapped_data[num_col], errors='coerce').fillna(0)
 
-    # ضبط الترتيب الشهري تلقائياً إذا كان صفراً
     if (mapped_data['month_weight'] == 0).all():
         mapped_data['month_weight'] = range(1, len(mapped_data) + 1)
 
@@ -125,7 +148,7 @@ i18n = {
         "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
         "upload_label": "رفع ملف تجربة المطالبات (Excel أو CSV)",
         "btn_process": "قراءة وتحليل البيانات",
-        "processing": "جاري فحص ومطابقة الأعمدة وضخ البيانات...",
+        "processing": "جاري تجاوز الترويسة ومطابقة بيانات المطالبات...",
         "success": "تمت معالجة البيانات وضخها بنجاح للجلسة: ",
         "btn_open_looker": "الانتقال المباشر إلى لوحة المؤشرات في Looker Studio",
         "warn_inputs": "يرجى تعبئة قسط الوثيقة، عدد الأفراد، وتاريخ السريان.",
@@ -142,7 +165,7 @@ i18n = {
         "members_label": "Total Covered Members (Lives)",
         "upload_label": "Upload Claims Experience (Excel or CSV)",
         "btn_process": "Process Data",
-        "processing": "Mapping columns and streaming clean records...",
+        "processing": "Skipping header metadata and parsing claims table...",
         "success": "Data processed successfully for session: ",
         "btn_open_looker": "Open Dashboard in Looker Studio",
         "warn_inputs": "Please enter current premium, covered members, and inception date.",
@@ -191,16 +214,9 @@ if current_premium:
 uploaded_file = st.file_uploader(t["upload_label"], type=["xlsx", "xls", "csv"])
 
 if uploaded_file:
-    # قراءة ومعاينة فورية لأعمدة الملف للتأكد منها
-    if uploaded_file.name.endswith(('xlsx', 'xls')):
-        excel_dict = pd.read_excel(uploaded_file, sheet_name=None)
-        first_sheet = list(excel_dict.keys())[0]
-        df_raw = excel_dict[first_sheet]
-    else:
-        df_raw = pd.read_csv(uploaded_file)
-
-    with st.expander("🔍 معاينة أعمدة الملف المكتشفة", expanded=False):
-        st.write("أسماء الأعمدة في ملفك:", list(df_raw.columns))
+    df_raw = find_table_header_and_read(uploaded_file)
+    with st.expander("🔍 معاينة أعمدة الجدول المكتشفة بعد تخطي الترويسة", expanded=True):
+        st.write("أعمدة الجدول الفعلي:", list(df_raw.columns))
         st.dataframe(df_raw.head(3))
 
     if st.button(t["btn_process"]):
