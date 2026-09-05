@@ -2,7 +2,8 @@ import io
 import re
 import uuid
 import urllib.parse
-from datetime import datetime
+import calendar
+from datetime import datetime, date
 import streamlit as st
 import pandas as pd
 import pdfplumber
@@ -19,43 +20,44 @@ st.set_page_config(
 TEXTS = {
     "ar": {
         "title": "📤 استيعاب وتحليل تقرير تجربة المطالبات",
-        "subtitle": "الأنظمة المدعومة: تقارير هيئة التأمين بصيغة Excel أو PDF. معالجة معزولة ومحمية بالكامل.",
-        "uploader_label": "اختر ملف تقرير المطالبات للبدء بالتحليل اللحظي:",
-        "processing": "جارٍ استخراج البيانات، عزل الجلسة، وتغذية لوحة التفاوض...",
-        "error_parse": "تعذر التعرف على جداول التقرير. يرجى التأكد من رفع التقرير المعتمد من الهيئة.",
-        "error_api": "حدث خطأ أثناء تحديث قاعدة البيانات المركزية. يرجى مراجعة الصلاحيات.",
-        "success_msg": "تمت معالجة البيانات وحقنها بنجاح! رمز جلستك المعزولة:",
-        "btn_dashboard": "🚀 فتح لوحة التحليل والتفاوض الخاصة بك",
+        "subtitle": "معايرة اكتوارية متقدمة للأشهر العقدية مع عزل كامل للجلسة.",
+        "policy_date_label": "تاريخ سريان الوثيقة الحالية (Policy Inception Date):",
+        "expander_label": "⚙️ مدخلات متقدمة للتفاوض ومحاكاة التجديد (اختياري)",
+        "premium_label": "قيمة قسط الوثيقة الحالية بالريال (Current Premium SAR):",
+        "census_label": "تعداد المؤمن عليهم المستهدف للتجديد (Target Renewal Census):",
+        "uploader_label": "اختر ملف تقرير المطالبات (Excel أو PDF):",
+        "processing": "جارٍ معايرة الأوزان النسبية للأشهر، عزل الجلسة، وحقن البيانات...",
+        "error_parse": "تعذر التعرف على جداول التقرير. يرجى التأكد من رفع التقرير المعتمد.",
+        "error_api": "حدث خطأ أثناء تحديث مستودع البيانات. يرجى مراجعة الصلاحيات.",
+        "success_msg": "تمت معالجة البيانات بنجاح! رمز جلستك المعزولة:",
+        "btn_dashboard": "🚀 فتح لوحة التحليل والتفاوض",
         "btn_download": "📥 تحميل نسخة احتياطية مسطحة (Excel)",
         "btn_purge": "🔒 إنهاء جلسة التفاوض وحذف البيانات فوراً",
         "purging_msg": "جارٍ إتلاف سجلات الجلسة من خوادم المعالجة بأمان...",
-        "purge_success": "تم إتلاف بيانات الجلسة بنجاح من قاعدة البيانات المركزية.",
-        "sec_lang": "اللغة / Language"
+        "purge_success": "تم إتلاف بيانات الجلسة بنجاح من قاعدة البيانات المركزية."
     },
     "en": {
         "title": "📤 Claims Experience Ingestor & Intelligence",
-        "subtitle": "Supported formats: Insurance Authority standardized Excel or PDF reports. Fully session-isolated.",
-        "uploader_label": "Upload Claims Experience report to start real-time analysis:",
-        "processing": "Standardizing data, isolating negotiation session, and updating analytical layer...",
-        "error_parse": "Failed to parse standardized tables. Please ensure the official Insurance Authority format is uploaded.",
-        "error_api": "Error occurred while updating the central repository. Please verify access permissions.",
-        "success_msg": "Data processed and integrated successfully! Isolated Session ID:",
-        "btn_dashboard": "🚀 Launch Negotiation & Analysis Dashboard",
+        "subtitle": "Actuarially normalized policy exposure with complete session isolation.",
+        "policy_date_label": "Current Policy Inception Date:",
+        "expander_label": "⚙️ Advanced Inputs for Renewal Negotiation (Optional)",
+        "premium_label": "Current Policy Premium (SAR):",
+        "census_label": "Target Renewal Census Count:",
+        "uploader_label": "Upload Claims Experience report (Excel or PDF):",
+        "processing": "Normalizing month weights, isolating session, and updating data layer...",
+        "error_parse": "Failed to parse standardized tables. Please verify report format.",
+        "error_api": "Error updating central data repository. Verify permissions.",
+        "success_msg": "Data processed successfully! Isolated Session ID:",
+        "btn_dashboard": "🚀 Launch Negotiation Dashboard",
         "btn_download": "📥 Download Clean Backup Data (Excel)",
         "btn_purge": "🔒 End Session & Purge Data Immediately",
-        "purging_msg": "Securely purging session records from the central repository...",
-        "purge_success": "Session data has been completely erased from the repository.",
-        "sec_lang": "Language / اللغة"
+        "purging_msg": "Securely purging session records from repository...",
+        "purge_success": "Session data has been completely erased from the repository."
     }
 }
 
-# اختيار اللغة من الشريط الجانبي
 with st.sidebar:
-    lang_choice = st.radio(
-        "Interface Language / لغة الواجهة",
-        options=["العربية", "English"],
-        index=0
-    )
+    lang_choice = st.radio("Language / اللغة", options=["العربية", "English"], index=0)
     lang = "ar" if lang_choice == "العربية" else "en"
     t = TEXTS[lang]
 
@@ -87,20 +89,16 @@ def append_to_sheets(df_monthly, df_benefits, df_providers):
     sheet_id = st.secrets["SPREADSHEET_ID"]
     sh = client.open_by_key(sheet_id)
     
-    # 1. Monthly_Performance
     ws_m = sh.worksheet("Monthly_Performance")
     ws_m.append_rows(df_monthly.values.tolist())
     
-    # 2. Benefits_Breakdown
     ws_b = sh.worksheet("Benefits_Breakdown")
     ws_b.append_rows(df_benefits.values.tolist())
     
-    # 3. Top_Providers
     ws_p = sh.worksheet("Top_Providers")
     ws_p.append_rows(df_providers.values.tolist())
 
 def delete_session_data(target_session_id):
-    """حذف كافة الصفوف المرتبطة بالجلسة فورياً من التبويبات الثلاثة"""
     client = get_gspread_client()
     sheet_id = st.secrets["SPREADSHEET_ID"]
     sh = client.open_by_key(sheet_id)
@@ -108,16 +106,47 @@ def delete_session_data(target_session_id):
     worksheets = ["Monthly_Performance", "Benefits_Breakdown", "Top_Providers"]
     for ws_name in worksheets:
         ws = sh.worksheet(ws_name)
-        session_col = ws.col_values(1)  # عمود session_id
-        
-        # حصر أرقام الصفوف المطابقة والحذف من الأسفل للأعلى لضمان ثبات الترقيم
-        rows_to_delete = [
-            i + 1 for i, val in enumerate(session_col) if val == target_session_id
-        ]
+        session_col = ws.col_values(1)
+        rows_to_delete = [i + 1 for i, val in enumerate(session_col) if val == target_session_id]
         for row_idx in reversed(rows_to_delete):
             ws.delete_rows(row_idx)
 
-def parse_claims_report(uploaded_file, session_id):
+def calculate_month_weights(df_monthly, inception_date):
+    """حساب الوزن النسبي بدقة الأيام للأشهر المنقومة والكاملة"""
+    if df_monthly.empty:
+        return df_monthly
+
+    start_day = inception_date.day
+    is_split_month = start_day > 1
+
+    unique_months = sorted(df_monthly['month_code'].unique().tolist())
+    total_months = len(unique_months)
+    weight_map = {}
+
+    for idx, m_code in enumerate(unique_months):
+        year_val = int(m_code[:4])
+        month_val = int(m_code[4:6])
+        days_in_month = calendar.monthrange(year_val, month_val)[1]
+
+        if not is_split_month:
+            weight_map[m_code] = 1.0
+        else:
+            if idx == 0:
+                # الشهر الأول: من يوم البداية إلى نهاية الشهر
+                coverage_days = days_in_month - start_day + 1
+                weight_map[m_code] = round(coverage_days / days_in_month, 4)
+            elif idx == 12 and total_months >= 13:
+                # الشهر الثالث عشر (نهاية السنة العقدية): حتى يوم البداية - 1
+                coverage_days = start_day - 1
+                weight_map[m_code] = round(coverage_days / days_in_month, 4)
+            else:
+                # الشهور الوسطى الكاملة
+                weight_map[m_code] = 1.0
+
+    df_monthly['month_weight'] = df_monthly['month_code'].map(weight_map).fillna(1.0)
+    return df_monthly
+
+def parse_claims_report(uploaded_file, session_id, inception_date):
     fname = uploaded_file.name.lower()
     timestamp = datetime.utcnow().isoformat()
     monthly_rows = []
@@ -127,7 +156,6 @@ def parse_claims_report(uploaded_file, session_id):
     if fname.endswith(('.xlsx', '.xls')):
         xls = pd.ExcelFile(uploaded_file)
         
-        # 1. Monthly Claims
         if 'Monthly Claims' in xls.sheet_names:
             df_mc = pd.read_excel(xls, sheet_name='Monthly Claims', header=None)
             class_tier = str(df_mc.iloc[5, 1]) if pd.notna(df_mc.iloc[5, 1]) else "Class A"
@@ -160,7 +188,6 @@ def parse_claims_report(uploaded_file, session_id):
                             'created_at': timestamp
                         })
         
-        # 2. Breakdown by Benefit
         if 'Breakdown by Benefit' in xls.sheet_names:
             df_bb = pd.read_excel(xls, sheet_name='Breakdown by Benefit', header=None)
             curr_year = None
@@ -190,7 +217,6 @@ def parse_claims_report(uploaded_file, session_id):
                             'created_at': timestamp
                         })
 
-        # 3. Top Providers
         if 'Top Providers' in xls.sheet_names:
             df_tp = pd.read_excel(xls, sheet_name='Top Providers', header=None)
             curr_year = None
@@ -240,35 +266,56 @@ def parse_claims_report(uploaded_file, session_id):
                         'created_at': timestamp
                     })
 
-    return (
-        pd.DataFrame(monthly_rows),
-        pd.DataFrame(benefits_rows),
-        pd.DataFrame(providers_rows)
-    )
+    df_monthly = pd.DataFrame(monthly_rows)
+    df_benefits = pd.DataFrame(benefits_rows)
+    df_providers = pd.DataFrame(providers_rows)
 
+    # تطبيق معادلة الأوزان الموزونة على أشهر السنة الحالية
+    if not df_monthly.empty:
+        df_monthly = calculate_month_weights(df_monthly, inception_date)
+        
+        # إعادة ترتيب الأعمدة لضمان تطابق الشيت: month_weight يليه created_at
+        cols_order = [
+            'session_id', 'class_tier', 'policy_year', 'month_code',
+            'active_lives', 'claims_count', 'paid_claims_sar', 'paid_claims_vat_sar',
+            'month_weight', 'created_at'
+        ]
+        df_monthly = df_monthly[cols_order]
+
+    return df_monthly, df_benefits, df_providers
+
+# --- واجهة المستخدم التنفيذية ---
 st.markdown(f"### {t['title']}")
 st.caption(t['subtitle'])
 
+# 1. إدخال تاريخ بداية الوثيقة (إلزامي للضبط الاكتواري)
+inception_date = st.date_input(t['policy_date_label'], value=date(2025, 1, 1))
+
+# 2. المدخلات المتقدمة الاختيارية
+with st.expander(t['expander_label']):
+    current_premium = st.number_input(t['premium_label'], min_value=0.0, value=0.0, step=10000.0)
+    target_census = st.number_input(t['census_label'], min_value=0, value=0, step=10)
+
+# 3. رافع الملفات
 uploaded = st.file_uploader(t['uploader_label'], type=["xlsx", "xls", "pdf"])
 
-# إدارة حالة الجلسة في الذاكرة التفاعلية
 if 'active_session' not in st.session_state:
     st.session_state.active_session = None
 
 if uploaded and not st.session_state.active_session:
     session_id = generate_session_id()
     with st.spinner(t['processing']):
-        df_monthly, df_benefits, df_providers = parse_claims_report(uploaded, session_id)
+        df_monthly, df_benefits, df_providers = parse_claims_report(uploaded, session_id, inception_date)
         
         if df_monthly.empty:
             st.error(t['error_parse'])
         else:
             try:
-                # الحقن المباشر في قاعدة البيانات
                 append_to_sheets(df_monthly, df_benefits, df_providers)
                 st.session_state.active_session = session_id
+                st.session_state.current_premium = current_premium
+                st.session_state.target_census = target_census
                 
-                # إعداد النسخة الاحتياطية
                 excel_buffer = io.BytesIO()
                 with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                     df_monthly.to_excel(writer, sheet_name='Monthly_Performance', index=False)
@@ -281,33 +328,39 @@ if uploaded and not st.session_state.active_session:
 
 if st.session_state.active_session:
     sid = st.session_state.active_session
+    c_prem = st.session_state.get('current_premium', 0.0)
+    t_cens = st.session_state.get('target_census', 0)
     
-    # تجهيز رابط Looker Studio مع تمرير المعلمات
+    # تمرير المعلمات إلى Looker Studio
     params = {
         "ds0.p_session_id": sid,
         "ds1.p_session_id": sid,
         "ds2.p_session_id": sid
     }
+    if c_prem > 0:
+        params["ds0.p_current_premium"] = float(c_prem)
+    if t_cens > 0:
+        params["ds0.p_target_census"] = int(t_cens)
+
     encoded_params = urllib.parse.quote(str(params).replace("'", '"'))
     looker_url = f"{LOOKER_STUDIO_BASE_URL}?params={encoded_params}"
     
     st.success(f"{t['success_msg']} **{sid}**")
     
-    # 1. زر فتح اللوحة
-    st.link_button(t['btn_dashboard'], looker_url, type="primary")
-    
-    # 2. زر تنزيل النسخة المسطحة
-    if 'backup_data' in st.session_state:
-        st.download_button(
-            label=t['btn_download'],
-            data=st.session_state.backup_data,
-            file_name=f"Clean_Claims_{sid}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    col1, col2 = st.columns(2)
+    with col1:
+        st.link_button(t['btn_dashboard'], looker_url, type="primary")
+    with col2:
+        if 'backup_data' in st.session_state:
+            st.download_button(
+                label=t['btn_download'],
+                data=st.session_state.backup_data,
+                file_name=f"Clean_Claims_{sid}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
     
     st.divider()
     
-    # 3. زر الإنهاء والحذف الفوري
     if st.button(t['btn_purge'], type="secondary"):
         with st.spinner(t['purging_msg']):
             delete_session_data(sid)
