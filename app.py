@@ -31,7 +31,13 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-# قاموس مطابقة الأعمدة الشائعة في تقارير التأمين
+# الأعمدة المعتمدة فعلياً داخل جدول BigQuery
+EXACT_BQ_COLUMNS = [
+    'session_id', 'created_at', 'policy_year', 'month_code', 
+    'month_weight', 'class_tier', 'active_lives', 'claims_count', 
+    'paid_claims_sar', 'paid_claims_vat_sar'
+]
+
 COLUMN_MAPPING = {
     'policy_year': ['policy_year', 'year', 'سنة', 'السنة'],
     'month_code': ['month_code', 'month', 'شهر', 'الشهر', 'period'],
@@ -45,14 +51,12 @@ COLUMN_MAPPING = {
 
 def map_and_clean_df(df, session_id, default_members):
     df_clean = df.copy()
-    # تنظيف مسميات الأعمدة الأصلية
     df_clean.columns = [str(c).strip().lower().replace(" ", "_").replace("/", "_") for c in df_clean.columns]
     
     mapped_data = pd.DataFrame()
     mapped_data['session_id'] = [str(session_id)] * len(df_clean)
     mapped_data['created_at'] = pd.Timestamp.now(tz='UTC')
 
-    # مطابقة الحقول الاكتوارية من الإكسل
     for target_col, variations in COLUMN_MAPPING.items():
         found = False
         for v in variations:
@@ -61,7 +65,6 @@ def map_and_clean_df(df, session_id, default_members):
                 found = True
                 break
         if not found:
-            # قيم افتراضية منطقية بدلاً من Null لضمان حساب مؤشرات اللوحة
             if target_col == 'active_lives':
                 mapped_data[target_col] = int(default_members) if default_members else 100
             elif target_col == 'policy_year':
@@ -71,18 +74,13 @@ def map_and_clean_df(df, session_id, default_members):
             else:
                 mapped_data[target_col] = "General"
 
-    # تنظيف المبالغ وتحويلها لأرقام
+    # تنظيف المبالغ الرقمية
     for num_col in ['paid_claims_sar', 'paid_claims_vat_sar', 'active_lives', 'claims_count', 'month_weight']:
         mapped_data[num_col] = mapped_data[num_col].astype(str).str.replace(',', '').str.replace('SAR', '').str.strip()
         mapped_data[num_col] = pd.to_numeric(mapped_data[num_col], errors='coerce').fillna(0)
 
-    # حقول التسميات الخاصة بـ Looker Studio
-    mapped_data['lbl_current_premium'] = "Current Premium"
-    mapped_data['lbl_projected_claims'] = "Projected Claims"
-    mapped_data['lbl_loss_ratio'] = "Loss Ratio"
-    mapped_data['lbl_burn_rate'] = "Burn Rate"
-
-    return mapped_data
+    # حصر وتصفية الأعمدة بدقة على ما هو موجود في BigQuery فقط دون أي حقل زائد
+    return mapped_data[EXACT_BQ_COLUMNS]
 
 def append_to_bigquery_free_tier(df_mapped):
     client = get_bq_client()
@@ -91,7 +89,7 @@ def append_to_bigquery_free_tier(df_mapped):
     job_config = bigquery.LoadJobConfig(
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
-        autodetect=True
+        autodetect=False  # إيقاف الاكتشاف التلقائي لضمان مطابقة الـ Schema الحالية
     )
     job = client.load_table_from_dataframe(df_mapped, table_ref, job_config=job_config)
     job.result()
@@ -201,10 +199,10 @@ if uploaded_file:
                     else:
                         df_raw = pd.read_csv(uploaded_file)
 
-                    # مطابقة الأعمدة الحقيقية ومنع الـ null
+                    # مطابقة الأعمدة الصريحة وحصرها بدقة
                     df_mapped = map_and_clean_df(df_raw, session_id, total_members)
 
-                    # الضخ المباشر
+                    # ضخ البيانات المتطابقة تماماً مع BigQuery
                     append_to_bigquery_free_tier(df_mapped)
 
                     url_params = {
