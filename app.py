@@ -3,7 +3,7 @@ import re
 import uuid
 import urllib.parse
 import calendar
-from datetime import datetime, date
+from datetime import datetime
 import streamlit as st
 import pandas as pd
 import pdfplumber
@@ -21,7 +21,8 @@ TEXTS = {
     "ar": {
         "title": "📤 استيعاب وتحليل تقرير تجربة المطالبات",
         "subtitle": "معايرة اكتوارية متقدمة للأشهر العقدية مع عزل كامل للجلسة.",
-        "policy_date_label": "تاريخ سريان الوثيقة الحالية (Policy Inception Date):",
+        "policy_date_label": "تاريخ سريان الوثيقة الحالية (Policy Inception Date) *:",
+        "date_warning": "يرجى تحديد تاريخ سريان الوثيقة للبدء في معالجة البيانات.",
         "expander_label": "⚙️ مدخلات متقدمة للتفاوض ومحاكاة التجديد (اختياري)",
         "premium_label": "قيمة قسط الوثيقة الحالية بالريال (Current Premium SAR):",
         "census_label": "تعداد المؤمن عليهم المستهدف للتجديد (Target Renewal Census):",
@@ -39,7 +40,8 @@ TEXTS = {
     "en": {
         "title": "📤 Claims Experience Ingestor & Intelligence",
         "subtitle": "Actuarially normalized policy exposure with complete session isolation.",
-        "policy_date_label": "Current Policy Inception Date:",
+        "policy_date_label": "Current Policy Inception Date *:",
+        "date_warning": "Please select the policy inception date to proceed with processing.",
         "expander_label": "⚙️ Advanced Inputs for Renewal Negotiation (Optional)",
         "premium_label": "Current Policy Premium (SAR):",
         "census_label": "Target Renewal Census Count:",
@@ -112,8 +114,7 @@ def delete_session_data(target_session_id):
             ws.delete_rows(row_idx)
 
 def calculate_month_weights(df_monthly, inception_date):
-    """حساب الوزن النسبي بدقة الأيام للأشهر المنقومة والكاملة"""
-    if df_monthly.empty:
+    if df_monthly.empty or inception_date is None:
         return df_monthly
 
     start_day = inception_date.day
@@ -132,15 +133,12 @@ def calculate_month_weights(df_monthly, inception_date):
             weight_map[m_code] = 1.0
         else:
             if idx == 0:
-                # الشهر الأول: من يوم البداية إلى نهاية الشهر
                 coverage_days = days_in_month - start_day + 1
                 weight_map[m_code] = round(coverage_days / days_in_month, 4)
             elif idx == 12 and total_months >= 13:
-                # الشهر الثالث عشر (نهاية السنة العقدية): حتى يوم البداية - 1
                 coverage_days = start_day - 1
                 weight_map[m_code] = round(coverage_days / days_in_month, 4)
             else:
-                # الشهور الوسطى الكاملة
                 weight_map[m_code] = 1.0
 
     df_monthly['month_weight'] = df_monthly['month_code'].map(weight_map).fillna(1.0)
@@ -270,11 +268,8 @@ def parse_claims_report(uploaded_file, session_id, inception_date):
     df_benefits = pd.DataFrame(benefits_rows)
     df_providers = pd.DataFrame(providers_rows)
 
-    # تطبيق معادلة الأوزان الموزونة على أشهر السنة الحالية
     if not df_monthly.empty:
         df_monthly = calculate_month_weights(df_monthly, inception_date)
-        
-        # إعادة ترتيب الأعمدة لضمان تطابق الشيت: month_weight يليه created_at
         cols_order = [
             'session_id', 'class_tier', 'policy_year', 'month_code',
             'active_lives', 'claims_count', 'paid_claims_sar', 'paid_claims_vat_sar',
@@ -284,17 +279,37 @@ def parse_claims_report(uploaded_file, session_id, inception_date):
 
     return df_monthly, df_benefits, df_providers
 
-# --- واجهة المستخدم التنفيذية ---
+# --- واجهة المستخدم ---
 st.markdown(f"### {t['title']}")
 st.caption(t['subtitle'])
 
-# 1. إدخال تاريخ بداية الوثيقة (إلزامي للضبط الاكتواري)
-inception_date = st.date_input(t['policy_date_label'], value=date(2025, 1, 1))
+# 1. إدخال تاريخ بداية الوثيقة (بدون قيمة افتراضية لإلزام المستخدم)
+inception_date = st.date_input(
+    t['policy_date_label'],
+    value=None
+)
 
-# 2. المدخلات المتقدمة الاختيارية
+# 2. المدخلات المتقدمة الاختيارية مع تنسيق الفواصل الألفية
 with st.expander(t['expander_label']):
-    current_premium = st.number_input(t['premium_label'], min_value=0.0, value=0.0, step=10000.0)
-    target_census = st.number_input(t['census_label'], min_value=0, value=0, step=10)
+    current_premium = st.number_input(
+        t['premium_label'],
+        min_value=0.0,
+        value=0.0,
+        step=50000.0,
+        format="%f"  # يتيح عرض الفواصل والكسور بدقة
+    )
+    if current_premium > 0:
+        st.caption(f"القيمة المدخلة: **{current_premium:,.2f}** SAR")
+
+    target_census = st.number_input(
+        t['census_label'],
+        min_value=0,
+        value=0,
+        step=10,
+        format="%d"
+    )
+    if target_census > 0:
+        st.caption(f"التعداد المحدد: **{target_census:,}** فرد / مكفول")
 
 # 3. رافع الملفات
 uploaded = st.file_uploader(t['uploader_label'], type=["xlsx", "xls", "pdf"])
@@ -303,35 +318,38 @@ if 'active_session' not in st.session_state:
     st.session_state.active_session = None
 
 if uploaded and not st.session_state.active_session:
-    session_id = generate_session_id()
-    with st.spinner(t['processing']):
-        df_monthly, df_benefits, df_providers = parse_claims_report(uploaded, session_id, inception_date)
-        
-        if df_monthly.empty:
-            st.error(t['error_parse'])
-        else:
-            try:
-                append_to_sheets(df_monthly, df_benefits, df_providers)
-                st.session_state.active_session = session_id
-                st.session_state.current_premium = current_premium
-                st.session_state.target_census = target_census
-                
-                excel_buffer = io.BytesIO()
-                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                    df_monthly.to_excel(writer, sheet_name='Monthly_Performance', index=False)
-                    df_benefits.to_excel(writer, sheet_name='Benefits_Breakdown', index=False)
-                    df_providers.to_excel(writer, sheet_name='Top_Providers', index=False)
-                st.session_state.backup_data = excel_buffer.getvalue()
-                
-            except Exception as e:
-                st.error(f"{t['error_api']} ({str(e)})")
+    if inception_date is None:
+        st.error(t['date_warning'])
+    else:
+        session_id = generate_session_id()
+        with st.spinner(t['processing']):
+            df_monthly, df_benefits, df_providers = parse_claims_report(uploaded, session_id, inception_date)
+            
+            if df_monthly.empty:
+                st.error(t['error_parse'])
+            else:
+                try:
+                    append_to_sheets(df_monthly, df_benefits, df_providers)
+                    st.session_state.active_session = session_id
+                    st.session_state.current_premium = current_premium
+                    st.session_state.target_census = target_census
+                    
+                    excel_buffer = io.BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                        df_monthly.to_excel(writer, sheet_name='Monthly_Performance', index=False)
+                        df_benefits.to_excel(writer, sheet_name='Benefits_Breakdown', index=False)
+                        df_providers.to_excel(writer, sheet_name='Top_Providers', index=False)
+                    st.session_state.backup_data = excel_buffer.getvalue()
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"{t['error_api']} ({str(e)})")
 
 if st.session_state.active_session:
     sid = st.session_state.active_session
     c_prem = st.session_state.get('current_premium', 0.0)
     t_cens = st.session_state.get('target_census', 0)
     
-    # تمرير المعلمات إلى Looker Studio
     params = {
         "ds0.p_session_id": sid,
         "ds1.p_session_id": sid,
