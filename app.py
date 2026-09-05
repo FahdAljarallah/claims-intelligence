@@ -3,9 +3,7 @@ import pandas as pd
 from datetime import datetime
 import uuid
 import json
-import io
 import urllib.parse
-import pdfplumber
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
@@ -30,102 +28,115 @@ def get_bq_client():
                 clean_body = clean_body[1:]
             pk = f"-----BEGIN PRIVATE KEY-----\n{clean_body}\n-----END PRIVATE KEY-----\n"
         creds_dict["private_key"] = pk
-
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-# استخراج الجداول من ملفات الـ PDF
-def parse_pdf_claims(uploaded_pdf):
-    extracted_tables = []
-    with pdfplumber.open(uploaded_pdf) as pdf:
-        for page in pdf.pages:
-            tables = page.extract_tables()
-            for t in tables:
-                if t and len(t) > 1:
-                    df = pd.DataFrame(t[1:], columns=t[0])
-                    extracted_tables.append(df)
-    
-    if not extracted_tables:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-    
-    # الجدول الأول عادة يمثل الأداء الشهري للمطالبات في تقارير شركات التأمين
-    df_monthly = extracted_tables[0]
-    df_benefits = extracted_tables[1] if len(extracted_tables) > 1 else pd.DataFrame()
-    df_providers = extracted_tables[2] if len(extracted_tables) > 2 else pd.DataFrame()
-    
-    return df_monthly, df_benefits, df_providers
+# قاموس مطابقة الأعمدة الشائعة في تقارير التأمين
+COLUMN_MAPPING = {
+    'policy_year': ['policy_year', 'year', 'سنة', 'السنة'],
+    'month_code': ['month_code', 'month', 'شهر', 'الشهر', 'period'],
+    'month_weight': ['month_weight', 'month_no', 'ترتيب'],
+    'class_tier': ['class_tier', 'class', 'فئة', 'tier'],
+    'active_lives': ['active_lives', 'lives', 'members', 'الأعضاء', 'المؤمن عليهم'],
+    'claims_count': ['claims_count', 'count', 'عدد المطالبات', 'مطالبات'],
+    'paid_claims_sar': ['paid_claims_sar', 'net_paid', 'paid', 'claim_amount', 'المطالبات', 'المبلغ'],
+    'paid_claims_vat_sar': ['paid_claims_vat_sar', 'gross_paid', 'vat', 'الإجمالي']
+}
 
-# مطابقة ورفع البيانات المتوافقة مجاناً مع Free Tier
-def safe_load_to_bq(client, df, table_name):
-    if df.empty:
-        return
-    
-    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{table_name}"
+def map_and_clean_df(df, session_id, default_members):
     df_clean = df.copy()
+    # تنظيف مسميات الأعمدة الأصلية
+    df_clean.columns = [str(c).strip().lower().replace(" ", "_").replace("/", "_") for c in df_clean.columns]
     
-    # إزالة أي فهارس غير مسماة وتنظيف الرموز
-    unnamed = [c for c in df_clean.columns if str(c).startswith("Unnamed:")]
-    if unnamed:
-        df_clean.drop(columns=unnamed, inplace=True)
-        
-    df_clean.columns = [str(c).strip().replace(" ", "_").replace("/", "_").replace("-", "_") for c in df_clean.columns]
-    
-    # تنظيف المبالغ المالية من أي نصوص أو فواصل لضمان قراءتها كأرقام في BigQuery
-    for col in df_clean.columns:
-        if any(k in col.lower() for k in ['claim', 'paid', 'amount', 'incurred', 'مطالبات', 'مبلغ']):
-            try:
-                df_clean[col] = df_clean[col].astype(str).str.replace(',', '').str.replace('SAR', '').str.strip()
-                df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0.0)
-            except Exception:
-                pass
+    mapped_data = pd.DataFrame()
+    mapped_data['session_id'] = [str(session_id)] * len(df_clean)
+    mapped_data['created_at'] = pd.Timestamp.now(tz='UTC')
 
+    # مطابقة الحقول الاكتوارية من الإكسل
+    for target_col, variations in COLUMN_MAPPING.items():
+        found = False
+        for v in variations:
+            if v in df_clean.columns:
+                mapped_data[target_col] = df_clean[v]
+                found = True
+                break
+        if not found:
+            # قيم افتراضية منطقية بدلاً من Null لضمان حساب مؤشرات اللوحة
+            if target_col == 'active_lives':
+                mapped_data[target_col] = int(default_members) if default_members else 100
+            elif target_col == 'policy_year':
+                mapped_data[target_col] = str(datetime.now().year)
+            elif target_col in ['paid_claims_sar', 'claims_count', 'month_weight', 'paid_claims_vat_sar']:
+                mapped_data[target_col] = 0
+            else:
+                mapped_data[target_col] = "General"
+
+    # تنظيف المبالغ وتحويلها لأرقام
+    for num_col in ['paid_claims_sar', 'paid_claims_vat_sar', 'active_lives', 'claims_count', 'month_weight']:
+        mapped_data[num_col] = mapped_data[num_col].astype(str).str.replace(',', '').str.replace('SAR', '').str.strip()
+        mapped_data[num_col] = pd.to_numeric(mapped_data[num_col], errors='coerce').fillna(0)
+
+    # حقول التسميات الخاصة بـ Looker Studio
+    mapped_data['lbl_current_premium'] = "Current Premium"
+    mapped_data['lbl_projected_claims'] = "Projected Claims"
+    mapped_data['lbl_loss_ratio'] = "Loss Ratio"
+    mapped_data['lbl_burn_rate'] = "Burn Rate"
+
+    return mapped_data
+
+def append_to_bigquery_free_tier(df_mapped):
+    client = get_bq_client()
+    table_ref = f"{PROJECT_ID}.{DATASET_ID}.monthly_performance"
+    
     job_config = bigquery.LoadJobConfig(
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
         autodetect=True
     )
-    job = client.load_table_from_dataframe(df_clean, table_ref, job_config=job_config)
+    job = client.load_table_from_dataframe(df_mapped, table_ref, job_config=job_config)
     job.result()
 
 def delete_session_data(target_session_id):
     client = get_bq_client()
     tables = ["monthly_performance", "benefits_breakdown", "top_providers"]
     for t in tables:
-        query = f"DELETE FROM `{PROJECT_ID}.{DATASET_ID}.{t}` WHERE session_id = @sid"
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("sid", "STRING", target_session_id)]
-        )
-        client.query(query, job_config=job_config).result()
+        try:
+            query = f"DELETE FROM `{PROJECT_ID}.{DATASET_ID}.{t}` WHERE session_id = @sid"
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[bigquery.ScalarQueryParameter("sid", "STRING", target_session_id)]
+            )
+            client.query(query, job_config=job_config).result()
+        except Exception:
+            pass
 
-# الواجهة ثنائية اللغة
 i18n = {
     "AR": {
         "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
-        "subtitle": "قم برفع تقرير المطالبات (PDF أو Excel أو CSV) لقراءة الأداء وتحديث مؤشرات التفاوض فوراً.",
+        "subtitle": "قم برفع ملف تجربة المطالبات لقراءة الأداء وتحديث لوحة المؤشرات فوراً.",
         "lang_label": "اللغة / Language",
         "date_label": "تاريخ بداية سريان الوثيقة",
         "prem_label": "قسط الوثيقة السنوي الحالي (SAR)",
         "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
-        "upload_label": "رفع ملف تجربة المطالبات (PDF / Excel / CSV)",
+        "upload_label": "رفع ملف تجربة المطالبات (Excel أو CSV)",
         "btn_process": "قراءة وتحليل البيانات",
-        "processing": "جاري استخراج البيانات وضخ السجلات وتجهيز المؤشرات...",
+        "processing": "جاري فحص ومطابقة الأعمدة وضخ البيانات...",
         "success": "تمت معالجة البيانات وضخها بنجاح للجلسة: ",
         "btn_open_looker": "الانتقال المباشر إلى لوحة المؤشرات في Looker Studio",
         "warn_inputs": "يرجى تعبئة قسط الوثيقة، عدد الأفراد، وتاريخ السريان.",
         "session_mgmt": "إدارة وحوكمة الجلسة",
         "btn_end_session": "إنهاء الجلسة وحذف البيانات",
-        "session_cleared": "تم حذف بيانات الجلسة وتطهير السجلات بنجاح."
+        "session_cleared": "تم حذف بيانات الجلسة بنجاح وتطهير السجلات."
     },
     "EN": {
         "title": "Claims Intelligence & Renewal Dashboard",
-        "subtitle": "Upload claims experience report (PDF, Excel, CSV) to update negotiation KPIs.",
+        "subtitle": "Upload policy claims experience to analyze performance and update metrics.",
         "lang_label": "Language / اللغة",
         "date_label": "Policy Inception Date",
         "prem_label": "Current Annual Premium (SAR)",
         "members_label": "Total Covered Members (Lives)",
-        "upload_label": "Upload Claims Experience (PDF / Excel / CSV)",
+        "upload_label": "Upload Claims Experience (Excel or CSV)",
         "btn_process": "Process Data",
-        "processing": "Extracting tables and streaming records...",
+        "processing": "Mapping columns and streaming clean records...",
         "success": "Data processed successfully for session: ",
         "btn_open_looker": "Open Dashboard in Looker Studio",
         "warn_inputs": "Please enter current premium, covered members, and inception date.",
@@ -171,8 +182,7 @@ with col_prem:
 if current_premium:
     st.caption(f"SAR {current_premium:,.2f}")
 
-# دعم صيغ PDF و Excel و CSV صراحة
-uploaded_file = st.file_uploader(t["upload_label"], type=["pdf", "xlsx", "xls", "csv"])
+uploaded_file = st.file_uploader(t["upload_label"], type=["xlsx", "xls", "csv"])
 
 if uploaded_file:
     if st.button(t["btn_process"]):
@@ -183,36 +193,22 @@ if uploaded_file:
                 try:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
-                    now_ts = pd.Timestamp.now(tz='UTC')
 
-                    file_ext = uploaded_file.name.split('.')[-1].lower()
-
-                    if file_ext == 'pdf':
-                        df_m, df_b, df_p = parse_pdf_claims(uploaded_file)
-                    elif file_ext in ['xlsx', 'xls']:
+                    if uploaded_file.name.endswith(('xlsx', 'xls')):
                         excel_dict = pd.read_excel(uploaded_file, sheet_name=None)
-                        sheet_names = list(excel_dict.keys())
-                        df_m = excel_dict.get('Monthly', excel_dict.get('monthly_performance', excel_dict[sheet_names[0]]))
-                        df_b = excel_dict.get('Benefits', excel_dict.get('benefits_breakdown', pd.DataFrame()))
-                        df_p = excel_dict.get('Providers', excel_dict.get('top_providers', pd.DataFrame()))
+                        first_sheet = list(excel_dict.keys())[0]
+                        df_raw = excel_dict[first_sheet]
                     else:
                         df_raw = pd.read_csv(uploaded_file)
-                        df_m, df_b, df_p = df_raw, pd.DataFrame(), pd.DataFrame()
 
-                    for df in [df_m, df_b, df_p]:
-                        if not df.empty:
-                            df['session_id'] = session_id
-                            df['created_at'] = now_ts
+                    # مطابقة الأعمدة الحقيقية ومنع الـ null
+                    df_mapped = map_and_clean_df(df_raw, session_id, total_members)
 
-                    client = get_bq_client()
-                    safe_load_to_bq(client, df_m, "monthly_performance")
-                    safe_load_to_bq(client, df_b, "benefits_breakdown")
-                    safe_load_to_bq(client, df_p, "top_providers")
+                    # الضخ المباشر
+                    append_to_bigquery_free_tier(df_mapped)
 
                     url_params = {
                         "ds14.p_session_id": session_id,
-                        "ds15.p_session_id": session_id,
-                        "ds16.p_session_id": session_id,
                         "ds14.param_language": lang_code,
                         "ds14.p_current_premium": int(current_premium),
                         "ds14.p_target_census": int(total_members)
