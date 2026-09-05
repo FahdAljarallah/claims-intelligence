@@ -3,7 +3,6 @@ import pandas as pd
 from datetime import datetime
 import uuid
 import json
-import io
 import urllib.parse
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
@@ -21,7 +20,6 @@ LOOKER_REPORT_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
-    
     if "private_key" in creds_dict:
         pk = creds_dict["private_key"].replace("\\n", "\n")
         if "-----BEGIN PRIVATE KEY-----" not in pk:
@@ -34,46 +32,49 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-def upload_df_as_csv_bytes(client, df, table_name):
+# دالة رفع دفعية تستعلم عن أعمدة الجدول وتطابقها بالاسم لمنع تضارب الـ CSV
+def safe_load_to_bq(client, df, table_name):
     if df.empty:
         return
     
     table_ref = f"{PROJECT_ID}.{DATASET_ID}.{table_name}"
-    df_clean = df.copy()
+    df_upload = df.copy()
     
-    # إسقاط أعمدة الترقيم غير المسماة
-    unnamed_cols = [c for c in df_clean.columns if str(c).startswith("Unnamed:")]
-    if unnamed_cols:
-        df_clean.drop(columns=unnamed_cols, inplace=True)
-    
-    df_clean.columns = [
-        str(c).strip().replace(" ", "_").replace("/", "_").replace("-", "_") 
-        for c in df_clean.columns
-    ]
-    
-    csv_buffer = io.StringIO()
-    df_clean.to_csv(csv_buffer, index=False)
-    csv_bytes = io.BytesIO(csv_buffer.getvalue().encode('utf-8'))
-    
+    # تنظيف أسماء الأعمدة وإزالة الفهارس الوهمية
+    df_upload.columns = [str(c).strip().replace(" ", "_").replace("/", "_").replace("-", "_") for c in df_upload.columns]
+    unnamed = [c for c in df_upload.columns if c.startswith("Unnamed:")]
+    if unnamed:
+        df_upload.drop(columns=unnamed, inplace=True)
+        
+    try:
+        # فحص مخطط الجدول الفعلي لجلب الأعمدة المطلوبة فقط وترتيبها
+        table = client.get_table(table_ref)
+        expected_cols = [schema_field.name for schema_field in table.schema]
+        
+        # إضافة أي عمود مفقود بقيمة فارغة لضمان اكتمال الصف
+        for col in expected_cols:
+            if col not in df_upload.columns:
+                df_upload[col] = None
+                
+        # إعادة ترتيب الأعمدة لتطابق ترتيب الجدول تماماً
+        df_upload = df_upload[expected_cols]
+    except Exception:
+        pass # في حال كان الجدول غير موجود سيتم إنشاؤه تلقائياً
+
+    # تنفيذ مهمة التحميل المتوافقة مجاناً مع Free Tier
     job_config = bigquery.LoadJobConfig(
-        source_format=bigquery.SourceFormat.CSV,
-        skip_leading_rows=1,
-        autodetect=False,
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
-        schema_update_options=[
-            bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION
-        ]
+        autodetect=True
     )
-    
-    job = client.load_table_from_file(csv_bytes, table_ref, job_config=job_config)
+    job = client.load_table_from_dataframe(df_upload, table_ref, job_config=job_config)
     job.result()
 
 def append_to_bigquery_free_tier(df_monthly, df_benefits, df_providers):
     client = get_bq_client()
-    upload_df_as_csv_bytes(client, df_monthly, "monthly_performance")
-    upload_df_as_csv_bytes(client, df_benefits, "benefits_breakdown")
-    upload_df_as_csv_bytes(client, df_providers, "top_providers")
+    safe_load_to_bq(client, df_monthly, "monthly_performance")
+    safe_load_to_bq(client, df_benefits, "benefits_breakdown")
+    safe_load_to_bq(client, df_providers, "top_providers")
 
 def delete_session_data(target_session_id):
     client = get_bq_client()
@@ -169,12 +170,12 @@ if uploaded_file:
                 try:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
-                    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                    now_ts = pd.Timestamp.now(tz='UTC')
 
                     if uploaded_file.name.endswith(('xlsx', 'xls')):
                         excel_dict = pd.read_excel(uploaded_file, sheet_name=None)
+                        # قراءة الورقة الأولى كأداء شهري إذا لم تكن المسميات مطابقة تماماً
                         sheet_names = list(excel_dict.keys())
-                        
                         df_m = excel_dict.get('Monthly', excel_dict.get('monthly_performance', excel_dict[sheet_names[0]]))
                         df_b = excel_dict.get('Benefits', excel_dict.get('benefits_breakdown', pd.DataFrame()))
                         df_p = excel_dict.get('Providers', excel_dict.get('top_providers', pd.DataFrame()))
@@ -184,8 +185,8 @@ if uploaded_file:
 
                     for df in [df_m, df_b, df_p]:
                         if not df.empty:
-                            df['session_id'] = str(session_id)
-                            df['created_at'] = str(now_str)
+                            df['session_id'] = session_id
+                            df['created_at'] = now_ts
 
                     append_to_bigquery_free_tier(df_m, df_b, df_p)
 
