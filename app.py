@@ -104,6 +104,12 @@ def find_table_header_and_read(file_obj):
 
 def map_and_clean_df(df, session_id, default_members):
     df_clean = df.copy()
+    
+    # 1. استبعاد صفوف الترويسات النصية والفاصلة بين السنوات (مثل Policy Year - 2 Years Prior)
+    first_col = df_clean.columns[0]
+    valid_rows_mask = df_clean[first_col].astype(str).str.strip().str.extract(r'(\d{4,6})')[0].notnull()
+    df_clean = df_clean[valid_rows_mask].copy()
+
     cleaned_col_lookup = {
         str(c).strip().lower(): c 
         for c in df_clean.columns
@@ -132,29 +138,31 @@ def map_and_clean_df(df, session_id, default_members):
             else:
                 mapped_data[target_col] = "General"
 
-    # 1. تطهير حقل الشهر وتوحيد نوعه كنص نقي لمنع أخطاء PyArrow
-    def clean_month_value(val):
-        if pd.isnull(val):
-            return "Unknown"
-        if isinstance(val, (datetime, pd.Timestamp)):
-            return val.strftime('%Y-%m')
-        val_str = str(val).strip()
-        return val_str if val_str else "Unknown"
+    # 2. تنظيف رمز الشهر واستخراج سنة الوثيقة ديناميكياً من الرمز الرقمي
+    def parse_month_and_year(val):
+        val_str = str(val).replace('.0', '').strip()
+        if len(val_str) >= 6 and val_str[:4].isdigit():
+            year = val_str[:4]
+            month = f"{val_str[:4]}-{val_str[4:6]}"
+            return month, year
+        return val_str, str(datetime.now().year)
 
-    mapped_data['month_code'] = mapped_data['month_code'].apply(clean_month_value).astype(str)
+    extracted_dates = mapped_data['month_code'].apply(parse_month_and_year)
+    mapped_data['month_code'] = [d[0] for d in extracted_dates]
+    mapped_data['policy_year'] = [d[1] for d in extracted_dates]
 
-    # 2. استبعاد صفوف المجموع الإجمالي (Total) لعدم تكرار المبالغ
+    # 3. استبعاد أي صفوف إجماليات إن وجدت
     mapped_data = mapped_data[~mapped_data['month_code'].str.lower().str.contains('total|مجموع|إجمالي', na=False)].copy()
 
-    # 3. تنظيف وتوحيد الأعمدة المالية والعددية
+    # 4. تنظيف وتوحيد الأعمدة الرقمية
     for num_col in ['paid_claims_sar', 'paid_claims_vat_sar', 'active_lives', 'claims_count', 'month_weight']:
         mapped_data[num_col] = mapped_data[num_col].astype(str).str.replace(',', '').str.replace('SAR', '').str.strip()
         mapped_data[num_col] = pd.to_numeric(mapped_data[num_col], errors='coerce').fillna(0)
 
-    # 4. إعادة بناء الترتيب الزمني للأشهر
+    # 5. ضبط الترتيب الزمني للأشهر
     mapped_data['month_weight'] = range(1, len(mapped_data) + 1)
 
-    # 5. تثبيت نوع النصوص الصريحة
+    # 6. تثبيت نوع النصوص الصريحة
     for str_col in ['session_id', 'policy_year', 'class_tier', 'month_code']:
         mapped_data[str_col] = mapped_data[str_col].astype(str)
 
@@ -195,7 +203,7 @@ i18n = {
         "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
         "upload_label": "رفع ملف تجربة المطالبات (Excel أو CSV)",
         "btn_process": "قراءة وتحليل البيانات",
-        "processing": "جاري معالجة السلسلة الزمنية وضخ البيانات إلى المستودع...",
+        "processing": "جاري تصفية الفواصل السنوية وضخ البيانات الإكتوارية...",
         "success": "تمت معالجة وضخ البيانات بنجاح للجلسة: ",
         "btn_open_looker": "الانتقال المباشر إلى لوحة المؤشرات في Looker Studio",
         "warn_inputs": "يرجى تعبئة قسط الوثيقة، عدد الأفراد، وتاريخ السريان.",
@@ -212,7 +220,7 @@ i18n = {
         "members_label": "Total Covered Members (Lives)",
         "upload_label": "Upload Claims Experience (Excel or CSV)",
         "btn_process": "Process Data",
-        "processing": "Processing time series and streaming records...",
+        "processing": "Filtering metadata subheaders and loading actuarial series...",
         "success": "Data processed successfully for session: ",
         "btn_open_looker": "Open Dashboard in Looker Studio",
         "warn_inputs": "Please enter current premium, covered members, and inception date.",
