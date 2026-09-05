@@ -32,7 +32,7 @@ def get_bq_client():
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
 EXACT_BQ_COLUMNS = [
-    'session_id', 'created_at', 'policy_year', 'month_code', 
+    'session_id', 'created_at', 'policy_year', 'policy_year_label', 'month_code', 
     'month_weight', 'class_tier', 'active_lives', 'claims_count', 
     'paid_claims_sar', 'paid_claims_vat_sar'
 ]
@@ -49,7 +49,7 @@ def parse_raw_insurance_report(file_obj, session_id, default_members):
     else:
         raw_df = pd.read_csv(file_obj, header=None)
 
-    # 1. استخراج الفئة المحددة في ترويسة العقد تلقائياً (مثل Product/Class: A)
+    # 1. استخراج فئة الوثيقة التعاقدية
     detected_class = "Class A"
     for idx, row in raw_df.head(10).iterrows():
         for c_idx, val in enumerate(row.values):
@@ -58,7 +58,7 @@ def parse_raw_insurance_report(file_obj, session_id, default_members):
                     detected_class = f"Class {str(row.values[c_idx + 1]).strip()}"
                     break
 
-    # 2. تحديد موقع ترويسة الجدول
+    # 2. رصد ترويسة الجدول
     header_idx = 10
     for idx, row in raw_df.head(25).iterrows():
         row_str = " ".join([str(val).lower() for val in row.values if pd.notnull(val)])
@@ -72,7 +72,7 @@ def parse_raw_insurance_report(file_obj, session_id, default_members):
     cleaned_records = []
     current_period_tag = "P2Y"
 
-    # 3. قراءة وتصنيف الفترات الاكتوارية
+    # 3. قراءة البيانات وحصر الشهور
     for _, row in data_rows.iterrows():
         cell_val = str(row.iloc[first_col_idx]).strip()
         cell_lower = cell_val.lower()
@@ -109,7 +109,7 @@ def parse_raw_insurance_report(file_obj, session_id, default_members):
                 'policy_year': str(current_period_tag),
                 'month_code': f"{raw_code[:4]}-{raw_code[4:]}",
                 'month_weight': 1,
-                'class_tier': str(detected_class),  # إسناد الفئة الفعلية للعقد (Class A)
+                'class_tier': str(detected_class),
                 'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
                 'claims_count': int(claims_cnt),
                 'paid_claims_sar': paid_amt,
@@ -118,6 +118,9 @@ def parse_raw_insurance_report(file_obj, session_id, default_members):
 
     df_result = pd.DataFrame(cleaned_records)
     if not df_result.empty:
+        # استخراج سنة البداية تلقائياً لكل فترة (CY, PY, P2Y) دون كتابة أي سنة يدوياً
+        min_months = df_result.groupby('policy_year')['month_code'].transform('min')
+        df_result['policy_year_label'] = min_months.apply(lambda m: f"{str(m)[:4]} / {int(str(m)[:4]) + 1}")
         return df_result[EXACT_BQ_COLUMNS]
     
     return pd.DataFrame(columns=EXACT_BQ_COLUMNS)
@@ -130,7 +133,8 @@ def append_to_bigquery_free_tier(df_mapped):
     job_config = bigquery.LoadJobConfig(
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
-        autodetect=False
+        schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
+        autodetect=True
     )
     job = client.load_table_from_dataframe(df_mapped, table_ref, job_config=job_config)
     job.result()
@@ -158,7 +162,7 @@ i18n = {
         "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
         "upload_label": "رفع ملف تجربة المطالبات (Excel أو CSV)",
         "btn_process": "قراءة وتحليل البيانات",
-        "processing": "جاري استخراج فئات الوثيقة وتجهيز المؤشرات...",
+        "processing": "جاري استخراج الفترات والسنوات الاكتوارية تلقائياً...",
         "success": "تمت معالجة وضخ البيانات بنجاح للجلسة: ",
         "btn_open_looker": "الانتقال المباشر إلى لوحة المؤشرات في Looker Studio",
         "warn_inputs": "يرجى تعبئة قسط الوثيقة، عدد الأفراد، وتاريخ السريان.",
@@ -175,7 +179,7 @@ i18n = {
         "members_label": "Total Covered Members (Lives)",
         "upload_label": "Upload Claims Experience (Excel or CSV)",
         "btn_process": "Process Data",
-        "processing": "Extracting policy classes and preparing KPIs...",
+        "processing": "Automatically deriving dynamic policy year labels...",
         "success": "Data processed successfully for session: ",
         "btn_open_looker": "Open Dashboard in Looker Studio",
         "warn_inputs": "Please enter current premium, covered members, and inception date.",
