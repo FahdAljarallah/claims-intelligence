@@ -7,6 +7,7 @@ import urllib.parse
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
+# 1. تهيئة الصفحة والبيئة
 st.set_page_config(
     page_title="Claims Intelligence Portal",
     page_icon="📊",
@@ -17,6 +18,7 @@ PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
 LOOKER_REPORT_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47/page/1f97F"
 
+# 2. إدارة المصادقة والاتصال السحابي
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -37,7 +39,6 @@ EXACT_BQ_COLUMNS = [
     'paid_claims_sar', 'paid_claims_vat_sar'
 ]
 
-# مطابقة حصرية ومحكمة لمسميات تقرير التأمين الواردة
 COLUMN_MAPPING = {
     'policy_year': ['policy_year', 'year', 'سنة', 'uw_year'],
     'month_code': ['monthly claims', 'month_code', 'month', 'شهر', 'period', 'incurred_month'],
@@ -85,8 +86,7 @@ def find_table_header_and_read(file_obj):
     found_table = False
     for idx, row in raw_df.head(30).iterrows():
         row_str = " ".join([str(val).lower() for val in row.values if pd.notnull(val)])
-        # التقاط السطر الصريح لأعمدة التقرير
-        if 'monthly claims' in row_str or ('amount of paid claims' in row_str):
+        if 'monthly claims' in row_str or 'amount of paid claims' in row_str:
             header_idx = idx
             found_table = True
             break
@@ -132,13 +132,31 @@ def map_and_clean_df(df, session_id, default_members):
             else:
                 mapped_data[target_col] = "General"
 
-    # تحويل وتنظيف الأرقام المالية
+    # 1. تطهير حقل الشهر وتوحيد نوعه كنص نقي لمنع أخطاء PyArrow
+    def clean_month_value(val):
+        if pd.isnull(val):
+            return "Unknown"
+        if isinstance(val, (datetime, pd.Timestamp)):
+            return val.strftime('%Y-%m')
+        val_str = str(val).strip()
+        return val_str if val_str else "Unknown"
+
+    mapped_data['month_code'] = mapped_data['month_code'].apply(clean_month_value).astype(str)
+
+    # 2. استبعاد صفوف المجموع الإجمالي (Total) لعدم تكرار المبالغ
+    mapped_data = mapped_data[~mapped_data['month_code'].str.lower().str.contains('total|مجموع|إجمالي', na=False)].copy()
+
+    # 3. تنظيف وتوحيد الأعمدة المالية والعددية
     for num_col in ['paid_claims_sar', 'paid_claims_vat_sar', 'active_lives', 'claims_count', 'month_weight']:
         mapped_data[num_col] = mapped_data[num_col].astype(str).str.replace(',', '').str.replace('SAR', '').str.strip()
         mapped_data[num_col] = pd.to_numeric(mapped_data[num_col], errors='coerce').fillna(0)
 
-    # ضبط الترتيب الزمني للأشهر تلقائياً
+    # 4. إعادة بناء الترتيب الزمني للأشهر
     mapped_data['month_weight'] = range(1, len(mapped_data) + 1)
+
+    # 5. تثبيت نوع النصوص الصريحة
+    for str_col in ['session_id', 'policy_year', 'class_tier', 'month_code']:
+        mapped_data[str_col] = mapped_data[str_col].astype(str)
 
     return mapped_data[EXACT_BQ_COLUMNS]
 
@@ -166,6 +184,7 @@ def delete_session_data(target_session_id):
         except Exception:
             pass
 
+# 3. مصفوفة نصوص الواجهة
 i18n = {
     "AR": {
         "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
@@ -176,8 +195,8 @@ i18n = {
         "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
         "upload_label": "رفع ملف تجربة المطالبات (Excel أو CSV)",
         "btn_process": "قراءة وتحليل البيانات",
-        "processing": "جاري استخراج أعمدة المطالبات وضخ السجلات...",
-        "success": "تمت معالجة البيانات وضخها بنجاح للجلسة: ",
+        "processing": "جاري معالجة السلسلة الزمنية وضخ البيانات إلى المستودع...",
+        "success": "تمت معالجة وضخ البيانات بنجاح للجلسة: ",
         "btn_open_looker": "الانتقال المباشر إلى لوحة المؤشرات في Looker Studio",
         "warn_inputs": "يرجى تعبئة قسط الوثيقة، عدد الأفراد، وتاريخ السريان.",
         "session_mgmt": "إدارة وحوكمة الجلسة",
@@ -193,7 +212,7 @@ i18n = {
         "members_label": "Total Covered Members (Lives)",
         "upload_label": "Upload Claims Experience (Excel or CSV)",
         "btn_process": "Process Data",
-        "processing": "Mapping claims metrics and streaming clean records...",
+        "processing": "Processing time series and streaming records...",
         "success": "Data processed successfully for session: ",
         "btn_open_looker": "Open Dashboard in Looker Studio",
         "warn_inputs": "Please enter current premium, covered members, and inception date.",
@@ -210,6 +229,7 @@ t = i18n[lang_code]
 st.title(t["title"])
 st.markdown(t["subtitle"])
 
+# 4. الحقول التشغيلية
 col_date, col_members = st.columns(2)
 with col_date:
     inception_date = st.date_input(t["date_label"], value=None)
@@ -241,6 +261,7 @@ if current_premium:
 
 uploaded_file = st.file_uploader(t["upload_label"], type=["xlsx", "xls", "csv"])
 
+# 5. منطق المعالجة والضخ
 if uploaded_file:
     df_raw = find_table_header_and_read(uploaded_file)
     with st.expander("🔍 معاينة أعمدة الجدول المكتشفة", expanded=False):
@@ -275,6 +296,7 @@ if uploaded_file:
                 except Exception as e:
                     st.error(f"حدث خطأ أثناء معالجة وضخ الملف: {str(e)}")
 
+# 6. قسم الحوكمة وإنهاء الجلسة
 if "active_session_id" in st.session_state:
     st.divider()
     st.subheader(t["session_mgmt"])
