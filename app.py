@@ -1,6 +1,8 @@
 import io
 import re
 import uuid
+import json
+import time
 import urllib.parse
 import calendar
 from datetime import datetime
@@ -20,7 +22,7 @@ st.set_page_config(
 TEXTS = {
     "ar": {
         "title": "📤 استيعاب وتحليل تقرير تجربة المطالبات",
-        "subtitle": "معايرة اكتوارية متقدمة للأشهر العقدية مع عزل كامل للجلسة.",
+        "subtitle": "معايرة اكتوارية متقدمة للأشهر العقدية مع عزل كامل للجلسة ومزامنة فورية.",
         "policy_date_label": "تاريخ سريان الوثيقة الحالية (Policy Inception Date) *:",
         "date_warning": "يرجى تحديد تاريخ سريان الوثيقة للبدء في معالجة البيانات.",
         "expander_label": "⚙️ مدخلات متقدمة للتفاوض ومحاكاة التجديد (اختياري)",
@@ -30,8 +32,8 @@ TEXTS = {
         "processing": "جارٍ معايرة الأوزان النسبية للأشهر، عزل الجلسة، وحقن البيانات...",
         "error_parse": "تعذر التعرف على جداول التقرير. يرجى التأكد من رفع التقرير المعتمد.",
         "error_api": "حدث خطأ أثناء تحديث مستودع البيانات. يرجى مراجعة الصلاحيات.",
-        "success_msg": "تمت معالجة البيانات بنجاح! رمز جلستك المعزولة:",
-        "btn_dashboard": "🚀 فتح لوحة التحليل والتفاوض",
+        "success_msg": "تمت معالجة البيانات وتحديث مستودع التحليل بنجاح! رمز الجلسة:",
+        "btn_dashboard": "🚀 فتح لوحة التحليل والتفاوض المباشر",
         "btn_download": "📥 تحميل نسخة احتياطية مسطحة (Excel)",
         "btn_purge": "🔒 إنهاء جلسة التفاوض وحذف البيانات فوراً",
         "purging_msg": "جارٍ إتلاف سجلات الجلسة من خوادم المعالجة بأمان...",
@@ -283,20 +285,20 @@ def parse_claims_report(uploaded_file, session_id, inception_date):
 st.markdown(f"### {t['title']}")
 st.caption(t['subtitle'])
 
-# 1. إدخال تاريخ بداية الوثيقة (بدون قيمة افتراضية لإلزام المستخدم)
+# 1. إدخال تاريخ بداية الوثيقة (إلزامي بدون قيمة افتراضية)
 inception_date = st.date_input(
     t['policy_date_label'],
     value=None
 )
 
-# 2. المدخلات المتقدمة الاختيارية مع تنسيق الفواصل الألفية
+# 2. المدخلات المتقدمة الاختيارية مع عرض الفواصل الألفية
 with st.expander(t['expander_label']):
     current_premium = st.number_input(
         t['premium_label'],
         min_value=0.0,
         value=0.0,
         step=50000.0,
-        format="%f"  # يتيح عرض الفواصل والكسور بدقة
+        format="%f"
     )
     if current_premium > 0:
         st.caption(f"القيمة المدخلة: **{current_premium:,.2f}** SAR")
@@ -350,18 +352,20 @@ if st.session_state.active_session:
     c_prem = st.session_state.get('current_premium', 0.0)
     t_cens = st.session_state.get('target_census', 0)
     
-    params = {
+    # بناء وتشفير المعلمات كـ JSON نظيف
+    params_payload = {
         "ds0.p_session_id": sid,
         "ds1.p_session_id": sid,
         "ds2.p_session_id": sid
     }
     if c_prem > 0:
-        params["ds0.p_current_premium"] = float(c_prem)
+        params_payload["ds0.p_current_premium"] = float(c_prem)
     if t_cens > 0:
-        params["ds0.p_target_census"] = int(t_cens)
+        params_payload["ds0.p_target_census"] = int(t_cens)
 
-    encoded_params = urllib.parse.quote(str(params).replace("'", '"'))
-    looker_url = f"{LOOKER_STUDIO_BASE_URL}?params={encoded_params}"
+    encoded_params = urllib.parse.quote(json.dumps(params_payload))
+    cache_buster = int(time.time())
+    looker_url = f"{LOOKER_STUDIO_BASE_URL}?params={encoded_params}&_cb={cache_buster}"
     
     st.success(f"{t['success_msg']} **{sid}**")
     
@@ -376,6 +380,8 @@ if st.session_state.active_session:
                 file_name=f"Clean_Claims_{sid}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+            
+    st.caption(f"💡 رابط الجلسة المباشر يتضمن معرف العزل وتخطي الذاكرة المخبأة.")
     
     st.divider()
     
