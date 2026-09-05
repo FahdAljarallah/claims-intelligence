@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 import uuid
 import json
 import urllib.parse
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
+# 1. إعدادات الصفحة
 st.set_page_config(
     page_title="Claims Intelligence Portal",
     page_icon="📊",
@@ -17,6 +18,7 @@ PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
 LOOKER_REPORT_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47/page/1f97F"
 
+# 2. إدارة المصادقة والاتصال بـ BigQuery
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -33,31 +35,39 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-# استخدام مهام التحميل المجانية بالكامل في Free Tier
+# دالة تهيئة وتطهير الأعمدة قبل الضخ
+def prepare_df_for_bq(df):
+    if df.empty:
+        return df
+    df = df.copy()
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            df[col] = pd.to_datetime(df[col])
+        elif df[col].apply(lambda x: isinstance(x, (datetime, date))).any():
+            df[col] = pd.to_datetime(df[col])
+    return df
+
+# الرفع الدفعي المجاني مع إنشاء الجداول تلقائياً إن لم تكن موجودة
 def append_to_bigquery_free_tier(df_monthly, df_benefits, df_providers):
     client = get_bq_client()
     
     job_config = bigquery.LoadJobConfig(
-        write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
+        autodetect=True
     )
 
-    if not df_monthly.empty:
-        job = client.load_table_from_dataframe(
-            df_monthly, f"{PROJECT_ID}.{DATASET_ID}.monthly_performance", job_config=job_config
-        )
-        job.result()  # انتظار اكتمال الرفع المجاني السريع
+    targets = [
+        (prepare_df_for_bq(df_monthly), "monthly_performance"),
+        (prepare_df_for_bq(df_benefits), "benefits_breakdown"),
+        (prepare_df_for_bq(df_providers), "top_providers")
+    ]
 
-    if not df_benefits.empty:
-        job = client.load_table_from_dataframe(
-            df_benefits, f"{PROJECT_ID}.{DATASET_ID}.benefits_breakdown", job_config=job_config
-        )
-        job.result()
-
-    if not df_providers.empty:
-        job = client.load_table_from_dataframe(
-            df_providers, f"{PROJECT_ID}.{DATASET_ID}.top_providers", job_config=job_config
-        )
-        job.result()
+    for df, table_name in targets:
+        if not df.empty:
+            table_ref = f"{PROJECT_ID}.{DATASET_ID}.{table_name}"
+            job = client.load_table_from_dataframe(df, table_ref, job_config=job_config)
+            job.result()
 
 def delete_session_data(target_session_id):
     client = get_bq_client()
@@ -69,6 +79,7 @@ def delete_session_data(target_session_id):
         )
         client.query(query, job_config=job_config).result()
 
+# 3. نصوص الواجهة ثنائية اللغة
 i18n = {
     "AR": {
         "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
@@ -113,6 +124,7 @@ t = i18n[lang_code]
 st.title(t["title"])
 st.markdown(t["subtitle"])
 
+# 4. مدخلات المعلمات التشغيلية (فارغة مسبقاً)
 col_date, col_members = st.columns(2)
 with col_date:
     inception_date = st.date_input(t["date_label"], value=None)
@@ -144,6 +156,7 @@ if current_premium:
 
 uploaded_file = st.file_uploader(t["upload_label"], type=["xlsx", "xls", "csv"])
 
+# 5. معالجة الملف والضخ التلقائي
 if uploaded_file:
     if st.button(t["btn_process"]):
         if not current_premium or not total_members or not inception_date:
@@ -153,7 +166,7 @@ if uploaded_file:
                 try:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
-                    now_iso = datetime.utcnow()
+                    now_ts = pd.Timestamp.now(tz='UTC')
 
                     if uploaded_file.name.endswith(('xlsx', 'xls')):
                         excel_dict = pd.read_excel(uploaded_file, sheet_name=None)
@@ -166,13 +179,11 @@ if uploaded_file:
                         df_raw = pd.read_csv(uploaded_file)
                         df_m, df_b, df_p = df_raw, pd.DataFrame(), pd.DataFrame()
 
-                    # تطعيم البيانات بالمعرفات التشغيلية
                     for df in [df_m, df_b, df_p]:
                         if not df.empty:
                             df['session_id'] = session_id
-                            df['created_at'] = now_iso
+                            df['created_at'] = now_ts
 
-                    # التحميل المجاني المتوافق مع قيود الحساب
                     append_to_bigquery_free_tier(df_m, df_b, df_p)
 
                     url_params = {
@@ -193,6 +204,7 @@ if uploaded_file:
                 except Exception as e:
                     st.error(f"حدث خطأ أثناء معالجة وضخ الملف: {str(e)}")
 
+# 6. قسم تطهير وحوكمة البيانات
 if "active_session_id" in st.session_state:
     st.divider()
     st.subheader(t["session_mgmt"])
