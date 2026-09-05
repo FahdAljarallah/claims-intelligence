@@ -4,3 +4,4 @@ openpyxl
 pdfplumber
 gspread
 google-auth
+google-cloud-bigquery
