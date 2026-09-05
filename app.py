@@ -34,7 +34,6 @@ TEXTS = {
         "error_api": "حدث خطأ أثناء تحديث مستودع البيانات. يرجى مراجعة الصلاحيات.",
         "success_msg": "تمت معالجة البيانات وتحديث مستودع التحليل بنجاح! رمز الجلسة:",
         "btn_dashboard": "🚀 فتح لوحة التحليل والتفاوض المباشر",
-        "btn_download": "📥 تحميل نسخة احتياطية مسطحة (Excel)",
         "btn_purge": "🔒 إنهاء جلسة التفاوض وحذف البيانات فوراً",
         "purging_msg": "جارٍ إتلاف سجلات الجلسة من خوادم المعالجة بأمان...",
         "purge_success": "تم إتلاف بيانات الجلسة بنجاح من قاعدة البيانات المركزية."
@@ -53,7 +52,6 @@ TEXTS = {
         "error_api": "Error updating central data repository. Verify permissions.",
         "success_msg": "Data processed successfully! Isolated Session ID:",
         "btn_dashboard": "🚀 Launch Negotiation Dashboard",
-        "btn_download": "📥 Download Clean Backup Data (Excel)",
         "btn_purge": "🔒 End Session & Purge Data Immediately",
         "purging_msg": "Securely purging session records from repository...",
         "purge_success": "Session data has been completely erased from the repository."
@@ -281,17 +279,17 @@ def parse_claims_report(uploaded_file, session_id, inception_date):
 
     return df_monthly, df_benefits, df_providers
 
-# --- واجهة المستخدم ---
+# --- واجهة المستخدم التنفيذية ---
 st.markdown(f"### {t['title']}")
 st.caption(t['subtitle'])
 
-# 1. إدخال تاريخ بداية الوثيقة (إلزامي بدون قيمة افتراضية)
+# 1. إدخال تاريخ بداية الوثيقة (إلزامي للضبط الاكتواري)
 inception_date = st.date_input(
     t['policy_date_label'],
     value=None
 )
 
-# 2. المدخلات المتقدمة الاختيارية مع عرض الفواصل الألفية
+# 2. المدخلات المتقدمة الاختيارية
 with st.expander(t['expander_label']):
     current_premium = st.number_input(
         t['premium_label'],
@@ -335,13 +333,6 @@ if uploaded and not st.session_state.active_session:
                     st.session_state.active_session = session_id
                     st.session_state.current_premium = current_premium
                     st.session_state.target_census = target_census
-                    
-                    excel_buffer = io.BytesIO()
-                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                        df_monthly.to_excel(writer, sheet_name='Monthly_Performance', index=False)
-                        df_benefits.to_excel(writer, sheet_name='Benefits_Breakdown', index=False)
-                        df_providers.to_excel(writer, sheet_name='Top_Providers', index=False)
-                    st.session_state.backup_data = excel_buffer.getvalue()
                     st.rerun()
                     
                 except Exception as e:
@@ -352,7 +343,7 @@ if st.session_state.active_session:
     c_prem = st.session_state.get('current_premium', 0.0)
     t_cens = st.session_state.get('target_census', 0)
     
-    # بناء وتشفير المعلمات كـ JSON نظيف
+    # بناء كائن المعلمات الصارم بدون أي مسافات فراغ
     params_payload = {
         "ds0.p_session_id": sid,
         "ds1.p_session_id": sid,
@@ -363,33 +354,23 @@ if st.session_state.active_session:
     if t_cens > 0:
         params_payload["ds0.p_target_census"] = int(t_cens)
 
-    encoded_params = urllib.parse.quote(json.dumps(params_payload))
+    # separators=(',', ':') يلغي المسافات الفاصلة نهائياً لمنع أخطاء التصفية في لوكر
+    clean_json = json.dumps(params_payload, separators=(',', ':'))
+    encoded_params = urllib.parse.quote(clean_json)
     cache_buster = int(time.time())
     looker_url = f"{LOOKER_STUDIO_BASE_URL}?params={encoded_params}&_cb={cache_buster}"
     
     st.success(f"{t['success_msg']} **{sid}**")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        st.link_button(t['btn_dashboard'], looker_url, type="primary")
-    with col2:
-        if 'backup_data' in st.session_state:
-            st.download_button(
-                label=t['btn_download'],
-                data=st.session_state.backup_data,
-                file_name=f"Clean_Claims_{sid}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            
-    st.caption(f"💡 رابط الجلسة المباشر يتضمن معرف العزل وتخطي الذاكرة المخبأة.")
+    # زر التشغيل الأساسي المباشر للوحة
+    st.link_button(t['btn_dashboard'], looker_url, type="primary", use_container_width=True)
     
     st.divider()
     
-    if st.button(t['btn_purge'], type="secondary"):
+    # زر الإنهاء الأمني الفوري للجلسة
+    if st.button(t['btn_purge'], type="secondary", use_container_width=True):
         with st.spinner(t['purging_msg']):
             delete_session_data(sid)
             st.session_state.active_session = None
-            if 'backup_data' in st.session_state:
-                del st.session_state.backup_data
             st.success(t['purge_success'])
             st.rerun()
