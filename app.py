@@ -7,7 +7,6 @@ import urllib.parse
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
-# 1. تهيئة الصفحة والبيئة
 st.set_page_config(
     page_title="Claims Intelligence Portal",
     page_icon="📊",
@@ -18,7 +17,6 @@ PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
 LOOKER_REPORT_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47/page/1f97F"
 
-# 2. إدارة المصادقة والاتصال السحابي
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -39,38 +37,9 @@ EXACT_BQ_COLUMNS = [
     'paid_claims_sar', 'paid_claims_vat_sar'
 ]
 
-COLUMN_MAPPING = {
-    'policy_year': ['policy_year', 'year', 'سنة', 'uw_year'],
-    'month_code': ['monthly claims', 'month_code', 'month', 'شهر', 'period', 'incurred_month'],
-    'month_weight': ['month_weight', 'month_no', 'ترتيب', 'm_no'],
-    'class_tier': ['class_tier', 'class', 'فئة', 'tier'],
-    'active_lives': ['number of lives insured', 'active_lives', 'lives', 'members', 'census'],
-    'claims_count': ['number of paid claims', 'claims_count', 'count', 'عدد المطالبات', 'claims'],
-    'paid_claims_sar': [
-        'amount of paid claims', 'paid_claims_sar', 'net_paid', 'paid', 'claim_amount', 
-        'المطالبات', 'المبلغ', 'net_incurred', 'paid_amount'
-    ],
-    'paid_claims_vat_sar': [
-        'amount of paid claims with vat', 'paid_claims_vat_sar', 'gross_paid', 'vat', 'الإجمالي'
-    ]
-}
-
-def deduplicate_column_names(columns):
-    seen = {}
-    new_cols = []
-    for idx, col in enumerate(columns):
-        val = str(col).strip() if pd.notnull(col) else f"col_{idx}"
-        if not val or val.lower() in ['nan', 'none']:
-            val = f"col_{idx}"
-        if val in seen:
-            seen[val] += 1
-            new_cols.append(f"{val}_{seen[val]}")
-        else:
-            seen[val] = 0
-            new_cols.append(val)
-    return new_cols
-
-def find_table_header_and_read(file_obj):
+# دالة هضم ملف شركة التأمين الخام واستخراج الشهور الاكتوارية بدقة متناهية
+def parse_raw_insurance_report(file_obj, session_id, default_members):
+    # 1. قراءة ورقة المطالبات الشهرية
     if file_obj.name.endswith(('xlsx', 'xls')):
         excel_data = pd.read_excel(file_obj, sheet_name=None, header=None)
         target_sheet = list(excel_data.keys())[0]
@@ -82,93 +51,86 @@ def find_table_header_and_read(file_obj):
     else:
         raw_df = pd.read_csv(file_obj, header=None)
 
-    header_idx = 0
-    found_table = False
-    for idx, row in raw_df.head(30).iterrows():
+    # 2. رصد موقع رأس الجدول الفعلي
+    header_idx = 10  # الموقع القياسي
+    for idx, row in raw_df.head(25).iterrows():
         row_str = " ".join([str(val).lower() for val in row.values if pd.notnull(val)])
-        if 'monthly claims' in row_str or 'amount of paid claims' in row_str:
+        if 'monthly claims' in row_str and 'paid claims' in row_str:
             header_idx = idx
-            found_table = True
             break
 
-    if found_table:
-        header_row = raw_df.iloc[header_idx].values
-        clean_columns = deduplicate_column_names(header_row)
-        df_data = raw_df.iloc[header_idx + 1:].copy()
-        df_data.columns = clean_columns
-    else:
-        df_data = raw_df.copy()
-        df_data.columns = deduplicate_column_names(df_data.columns)
+    # اعتماد الترويسة
+    raw_df.columns = [str(c).strip().lower() for c in raw_df.iloc[header_idx].values]
+    data_rows = raw_df.iloc[header_idx + 1:].copy()
 
-    return df_data.dropna(how='all')
-
-def map_and_clean_df(df, session_id, default_members):
-    df_clean = df.copy()
+    # 3. محرك الفلترة الذاتي: عزل أسطر الشهور الحقيقية وتصنيف سنوات الوثيقة
+    current_policy_year_label = "2023/2024"
+    cleaned_records = []
     
-    # 1. استبعاد صفوف الترويسات النصية والفاصلة بين السنوات (مثل Policy Year - 2 Years Prior)
-    first_col = df_clean.columns[0]
-    valid_rows_mask = df_clean[first_col].astype(str).str.strip().str.extract(r'(\d{4,6})')[0].notnull()
-    df_clean = df_clean[valid_rows_mask].copy()
-
-    cleaned_col_lookup = {
-        str(c).strip().lower(): c 
-        for c in df_clean.columns
-    }
+    first_col_name = data_rows.columns[0]
     
-    mapped_data = pd.DataFrame()
-    mapped_data['session_id'] = [str(session_id)] * len(df_clean)
-    mapped_data['created_at'] = pd.Timestamp.now(tz='UTC')
+    for _, row in data_rows.iterrows():
+        cell_val = str(row[first_col_name]).strip()
+        cell_lower = cell_val.lower()
 
-    for target_col, variations in COLUMN_MAPPING.items():
-        matched_original = None
-        for v in variations:
-            if v.lower() in cleaned_col_lookup:
-                matched_original = cleaned_col_lookup[v.lower()]
-                break
-        
-        if matched_original is not None:
-            mapped_data[target_col] = df_clean[matched_original]
-        else:
-            if target_col == 'active_lives':
-                mapped_data[target_col] = int(default_members) if default_members else 100
-            elif target_col == 'policy_year':
-                mapped_data[target_col] = str(datetime.now().year)
-            elif target_col in ['paid_claims_sar', 'claims_count', 'month_weight', 'paid_claims_vat_sar']:
-                mapped_data[target_col] = 0
-            else:
-                mapped_data[target_col] = "General"
+        # إذا كان السطر يمثل ترويسة فترة/سنة تأمينية
+        if 'policy year' in cell_lower or 'prior' in cell_lower:
+            if '2 years prior' in cell_lower:
+                current_policy_year_label = "2 Years Prior"
+            elif 'prior' in cell_lower:
+                current_policy_year_label = "Prior Year"
+            elif 'last' in cell_lower or 'current' in cell_lower:
+                current_policy_year_label = "Current Year"
+            continue
 
-    # 2. تنظيف رمز الشهر واستخراج سنة الوثيقة ديناميكياً من الرمز الرقمي
-    def parse_month_and_year(val):
-        val_str = str(val).replace('.0', '').strip()
-        if len(val_str) >= 6 and val_str[:4].isdigit():
-            year = val_str[:4]
-            month = f"{val_str[:4]}-{val_str[4:6]}"
-            return month, year
-        return val_str, str(datetime.now().year)
+        # استبعاد أسطر الإجماليات والصفوف الفارغة
+        if 'total' in cell_lower or cell_lower in ['nan', 'none', '']:
+            continue
 
-    extracted_dates = mapped_data['month_code'].apply(parse_month_and_year)
-    mapped_data['month_code'] = [d[0] for d in extracted_dates]
-    mapped_data['policy_year'] = [d[1] for d in extracted_dates]
+        # السطر يجب أن يحتوي على رمز شهر من 6 أرقام حصراً (مثل 202107)
+        if cell_val.replace('.0', '').isdigit() and len(cell_val.replace('.0', '')) == 6:
+            code = cell_val.replace('.0', '')
+            
+            # استخراج القيم بأمان مع إسناد الصفر في حال الخلايا الفارغة
+            def safe_num(idx):
+                try:
+                    val = str(row.iloc[idx]).replace(',', '').replace('SAR', '').strip()
+                    return float(val) if val not in ['nan', 'None', ''] else 0.0
+                except Exception:
+                    return 0.0
 
-    # 3. استبعاد أي صفوف إجماليات إن وجدت
-    mapped_data = mapped_data[~mapped_data['month_code'].str.lower().str.contains('total|مجموع|إجمالي', na=False)].copy()
+            # تعيين القيم بناءً على ترتيب الأعمدة المعتمد
+            lives = safe_num(1)
+            claims_cnt = safe_num(2)
+            paid_amt = safe_num(3)
+            paid_vat = safe_num(4)
 
-    # 4. تنظيف وتوحيد الأعمدة الرقمية
-    for num_col in ['paid_claims_sar', 'paid_claims_vat_sar', 'active_lives', 'claims_count', 'month_weight']:
-        mapped_data[num_col] = mapped_data[num_col].astype(str).str.replace(',', '').str.replace('SAR', '').str.strip()
-        mapped_data[num_col] = pd.to_numeric(mapped_data[num_col], errors='coerce').fillna(0)
+            # تحديد سنة الوثيقة بدقة (سنة البداية الفعلية أو تصنيف الفترة)
+            year_val = code[:4]
 
-    # 5. ضبط الترتيب الزمني للأشهر
-    mapped_data['month_weight'] = range(1, len(mapped_data) + 1)
+            cleaned_records.append({
+                'session_id': str(session_id),
+                'created_at': pd.Timestamp.now(tz='UTC'),
+                'policy_year': str(year_val),
+                'month_code': f"{code[:4]}-{code[4:]}",
+                'month_weight': 0, # سيتم ضبطه بالتسلسل
+                'class_tier': "General",
+                'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
+                'claims_count': int(claims_cnt),
+                'paid_claims_sar': paid_amt,
+                'paid_claims_vat_sar': paid_vat
+            })
 
-    # 6. تثبيت نوع النصوص الصريحة
-    for str_col in ['session_id', 'policy_year', 'class_tier', 'month_code']:
-        mapped_data[str_col] = mapped_data[str_col].astype(str)
-
-    return mapped_data[EXACT_BQ_COLUMNS]
+    df_result = pd.DataFrame(cleaned_records)
+    if not df_result.empty:
+        df_result['month_weight'] = range(1, len(df_result) + 1)
+        return df_result[EXACT_BQ_COLUMNS]
+    
+    return pd.DataFrame(columns=EXACT_BQ_COLUMNS)
 
 def append_to_bigquery_free_tier(df_mapped):
+    if df_mapped.empty:
+        return
     client = get_bq_client()
     table_ref = f"{PROJECT_ID}.{DATASET_ID}.monthly_performance"
     job_config = bigquery.LoadJobConfig(
@@ -192,7 +154,7 @@ def delete_session_data(target_session_id):
         except Exception:
             pass
 
-# 3. مصفوفة نصوص الواجهة
+# نصوص الواجهة
 i18n = {
     "AR": {
         "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
@@ -203,7 +165,7 @@ i18n = {
         "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
         "upload_label": "رفع ملف تجربة المطالبات (Excel أو CSV)",
         "btn_process": "قراءة وتحليل البيانات",
-        "processing": "جاري تصفية الفواصل السنوية وضخ البيانات الإكتوارية...",
+        "processing": "جاري تصفية وتجهيز البيانات آلياً دون تدخل بشري...",
         "success": "تمت معالجة وضخ البيانات بنجاح للجلسة: ",
         "btn_open_looker": "الانتقال المباشر إلى لوحة المؤشرات في Looker Studio",
         "warn_inputs": "يرجى تعبئة قسط الوثيقة، عدد الأفراد، وتاريخ السريان.",
@@ -220,7 +182,7 @@ i18n = {
         "members_label": "Total Covered Members (Lives)",
         "upload_label": "Upload Claims Experience (Excel or CSV)",
         "btn_process": "Process Data",
-        "processing": "Filtering metadata subheaders and loading actuarial series...",
+        "processing": "Automatically parsing and purifying claims records...",
         "success": "Data processed successfully for session: ",
         "btn_open_looker": "Open Dashboard in Looker Studio",
         "warn_inputs": "Please enter current premium, covered members, and inception date.",
@@ -237,7 +199,6 @@ t = i18n[lang_code]
 st.title(t["title"])
 st.markdown(t["subtitle"])
 
-# 4. الحقول التشغيلية
 col_date, col_members = st.columns(2)
 with col_date:
     inception_date = st.date_input(t["date_label"], value=None)
@@ -269,13 +230,7 @@ if current_premium:
 
 uploaded_file = st.file_uploader(t["upload_label"], type=["xlsx", "xls", "csv"])
 
-# 5. منطق المعالجة والضخ
 if uploaded_file:
-    df_raw = find_table_header_and_read(uploaded_file)
-    with st.expander("🔍 معاينة أعمدة الجدول المكتشفة", expanded=False):
-        st.write("الأعمدة الملتقطة:", list(df_raw.columns))
-        st.dataframe(df_raw.head(3))
-
     if st.button(t["btn_process"]):
         if not current_premium or not total_members or not inception_date:
             st.warning(t["warn_inputs"])
@@ -285,7 +240,12 @@ if uploaded_file:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
 
-                    df_mapped = map_and_clean_df(df_raw, session_id, total_members)
+                    # استخراج وتطهير أوتوماتيكي كامل من جهتنا
+                    df_mapped = parse_raw_insurance_report(uploaded_file, session_id, total_members)
+                    
+                    if df_mapped.empty:
+                        raise ValueError("لم يتم العثور على أسطر مطالبات صالحة داخل الملف.")
+
                     append_to_bigquery_free_tier(df_mapped)
 
                     url_params = {
@@ -302,9 +262,8 @@ if uploaded_file:
                     st.link_button(label=t["btn_open_looker"], url=target_url, type="primary")
 
                 except Exception as e:
-                    st.error(f"حدث خطأ أثناء معالجة وضخ الملف: {str(e)}")
+                    st.error(f"حدث خطأ أثناء معالجة الملف: {str(e)}")
 
-# 6. قسم الحوكمة وإنهاء الجلسة
 if "active_session_id" in st.session_state:
     st.divider()
     st.subheader(t["session_mgmt"])
