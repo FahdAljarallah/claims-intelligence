@@ -31,40 +31,46 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-# الأعمدة المعتمدة فعلياً داخل جدول BigQuery
 EXACT_BQ_COLUMNS = [
     'session_id', 'created_at', 'policy_year', 'month_code', 
     'month_weight', 'class_tier', 'active_lives', 'claims_count', 
     'paid_claims_sar', 'paid_claims_vat_sar'
 ]
 
+# قاموس موسع وشامل يطابق مصطلحات السوق السعودي
 COLUMN_MAPPING = {
-    'policy_year': ['policy_year', 'year', 'سنة', 'السنة'],
-    'month_code': ['month_code', 'month', 'شهر', 'الشهر', 'period'],
-    'month_weight': ['month_weight', 'month_no', 'ترتيب'],
-    'class_tier': ['class_tier', 'class', 'فئة', 'tier'],
-    'active_lives': ['active_lives', 'lives', 'members', 'الأعضاء', 'المؤمن عليهم'],
-    'claims_count': ['claims_count', 'count', 'عدد المطالبات', 'مطالبات'],
-    'paid_claims_sar': ['paid_claims_sar', 'net_paid', 'paid', 'claim_amount', 'المطالبات', 'المبلغ'],
-    'paid_claims_vat_sar': ['paid_claims_vat_sar', 'gross_paid', 'vat', 'الإجمالي']
+    'policy_year': ['policy_year', 'year', 'سنة', 'السنة', 'policy year', 'uw_year'],
+    'month_code': ['month_code', 'month', 'شهر', 'الشهر', 'period', 'incurred_month', 'treatment_month', 'date'],
+    'month_weight': ['month_weight', 'month_no', 'ترتيب', 'm_no', 'seq'],
+    'class_tier': ['class_tier', 'class', 'فئة', 'tier', 'category', 'الفئة'],
+    'active_lives': ['active_lives', 'lives', 'members', 'الأعضاء', 'المؤمن عليهم', 'census', 'headcount', 'enrolled'],
+    'claims_count': ['claims_count', 'count', 'عدد المطالبات', 'مطالبات', 'claims', 'utilization_count', 'no_of_claims'],
+    'paid_claims_sar': [
+        'paid_claims_sar', 'net_paid', 'paid', 'claim_amount', 'المطالبات', 'المبلغ', 
+        'paid_amount', 'net_incurred', 'incurred', 'settled_amount', 'claims_paid', 'المطالبات المسددة'
+    ],
+    'paid_claims_vat_sar': ['paid_claims_vat_sar', 'gross_paid', 'vat', 'الإجمالي', 'total_with_vat', 'gross_amount']
 }
 
 def map_and_clean_df(df, session_id, default_members):
     df_clean = df.copy()
-    df_clean.columns = [str(c).strip().lower().replace(" ", "_").replace("/", "_") for c in df_clean.columns]
+    # تنظيف وتوحيد نصوص الأعمدة للبحث
+    cleaned_col_lookup = {str(c).strip().lower().replace(" ", "_").replace("/", "_").replace("-", "_"): c for c in df_clean.columns}
     
     mapped_data = pd.DataFrame()
     mapped_data['session_id'] = [str(session_id)] * len(df_clean)
     mapped_data['created_at'] = pd.Timestamp.now(tz='UTC')
 
     for target_col, variations in COLUMN_MAPPING.items():
-        found = False
+        matched_original = None
         for v in variations:
-            if v in df_clean.columns:
-                mapped_data[target_col] = df_clean[v]
-                found = True
+            if v in cleaned_col_lookup:
+                matched_original = cleaned_col_lookup[v]
                 break
-        if not found:
+        
+        if matched_original is not None:
+            mapped_data[target_col] = df_clean[matched_original]
+        else:
             if target_col == 'active_lives':
                 mapped_data[target_col] = int(default_members) if default_members else 100
             elif target_col == 'policy_year':
@@ -74,22 +80,24 @@ def map_and_clean_df(df, session_id, default_members):
             else:
                 mapped_data[target_col] = "General"
 
-    # تنظيف المبالغ الرقمية
+    # تحويل الأرقام وتنظيف الفواصل والرموز
     for num_col in ['paid_claims_sar', 'paid_claims_vat_sar', 'active_lives', 'claims_count', 'month_weight']:
         mapped_data[num_col] = mapped_data[num_col].astype(str).str.replace(',', '').str.replace('SAR', '').str.strip()
         mapped_data[num_col] = pd.to_numeric(mapped_data[num_col], errors='coerce').fillna(0)
 
-    # حصر وتصفية الأعمدة بدقة على ما هو موجود في BigQuery فقط دون أي حقل زائد
+    # ضبط الترتيب الشهري تلقائياً إذا كان صفراً
+    if (mapped_data['month_weight'] == 0).all():
+        mapped_data['month_weight'] = range(1, len(mapped_data) + 1)
+
     return mapped_data[EXACT_BQ_COLUMNS]
 
 def append_to_bigquery_free_tier(df_mapped):
     client = get_bq_client()
     table_ref = f"{PROJECT_ID}.{DATASET_ID}.monthly_performance"
-    
     job_config = bigquery.LoadJobConfig(
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
-        autodetect=False  # إيقاف الاكتشاف التلقائي لضمان مطابقة الـ Schema الحالية
+        autodetect=False
     )
     job = client.load_table_from_dataframe(df_mapped, table_ref, job_config=job_config)
     job.result()
@@ -183,6 +191,18 @@ if current_premium:
 uploaded_file = st.file_uploader(t["upload_label"], type=["xlsx", "xls", "csv"])
 
 if uploaded_file:
+    # قراءة ومعاينة فورية لأعمدة الملف للتأكد منها
+    if uploaded_file.name.endswith(('xlsx', 'xls')):
+        excel_dict = pd.read_excel(uploaded_file, sheet_name=None)
+        first_sheet = list(excel_dict.keys())[0]
+        df_raw = excel_dict[first_sheet]
+    else:
+        df_raw = pd.read_csv(uploaded_file)
+
+    with st.expander("🔍 معاينة أعمدة الملف المكتشفة", expanded=False):
+        st.write("أسماء الأعمدة في ملفك:", list(df_raw.columns))
+        st.dataframe(df_raw.head(3))
+
     if st.button(t["btn_process"]):
         if not current_premium or not total_members or not inception_date:
             st.warning(t["warn_inputs"])
@@ -192,17 +212,7 @@ if uploaded_file:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
 
-                    if uploaded_file.name.endswith(('xlsx', 'xls')):
-                        excel_dict = pd.read_excel(uploaded_file, sheet_name=None)
-                        first_sheet = list(excel_dict.keys())[0]
-                        df_raw = excel_dict[first_sheet]
-                    else:
-                        df_raw = pd.read_csv(uploaded_file)
-
-                    # مطابقة الأعمدة الصريحة وحصرها بدقة
                     df_mapped = map_and_clean_df(df_raw, session_id, total_members)
-
-                    # ضخ البيانات المتطابقة تماماً مع BigQuery
                     append_to_bigquery_free_tier(df_mapped)
 
                     url_params = {
