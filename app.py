@@ -37,9 +37,7 @@ EXACT_BQ_COLUMNS = [
     'paid_claims_sar', 'paid_claims_vat_sar'
 ]
 
-# دالة هضم ملف شركة التأمين الخام واستخراج الشهور الاكتوارية بدقة متناهية
 def parse_raw_insurance_report(file_obj, session_id, default_members):
-    # 1. قراءة ورقة المطالبات الشهرية
     if file_obj.name.endswith(('xlsx', 'xls')):
         excel_data = pd.read_excel(file_obj, sheet_name=None, header=None)
         target_sheet = list(excel_data.keys())[0]
@@ -51,47 +49,42 @@ def parse_raw_insurance_report(file_obj, session_id, default_members):
     else:
         raw_df = pd.read_csv(file_obj, header=None)
 
-    # 2. رصد موقع رأس الجدول الفعلي
-    header_idx = 10  # الموقع القياسي
+    # 1. تحديد موقع ترويسة الجدول
+    header_idx = 10
     for idx, row in raw_df.head(25).iterrows():
         row_str = " ".join([str(val).lower() for val in row.values if pd.notnull(val)])
         if 'monthly claims' in row_str and 'paid claims' in row_str:
             header_idx = idx
             break
 
-    # اعتماد الترويسة
-    raw_df.columns = [str(c).strip().lower() for c in raw_df.iloc[header_idx].values]
     data_rows = raw_df.iloc[header_idx + 1:].copy()
+    first_col_idx = 0
 
-    # 3. محرك الفلترة الذاتي: عزل أسطر الشهور الحقيقية وتصنيف سنوات الوثيقة
-    current_policy_year_label = "2023/2024"
     cleaned_records = []
-    
-    first_col_name = data_rows.columns[0]
-    
+    current_period_tag = "P2Y"  # البداية الافتراضية للفترة الأقدم
+
+    # 2. قراءة وتصنيف الفترات الاكتوارية تلقائياً
     for _, row in data_rows.iterrows():
-        cell_val = str(row[first_col_name]).strip()
+        cell_val = str(row.iloc[first_col_idx]).strip()
         cell_lower = cell_val.lower()
 
-        # إذا كان السطر يمثل ترويسة فترة/سنة تأمينية
-        if 'policy year' in cell_lower or 'prior' in cell_lower:
+        # كشف الفواصل السنوية لشركة التأمين
+        if 'policy year' in cell_lower or 'prior' in cell_lower or 'last' in cell_lower:
             if '2 years prior' in cell_lower:
-                current_policy_year_label = "2 Years Prior"
-            elif 'prior' in cell_lower:
-                current_policy_year_label = "Prior Year"
-            elif 'last' in cell_lower or 'current' in cell_lower:
-                current_policy_year_label = "Current Year"
+                current_period_tag = "P2Y"
+            elif 'prior policy year' in cell_lower or 'prior year' in cell_lower:
+                current_period_tag = "PY"
+            elif 'last policy year' in cell_lower or 'current' in cell_lower:
+                current_period_tag = "CY"
             continue
 
-        # استبعاد أسطر الإجماليات والصفوف الفارغة
+        # استبعاد أسطر الإجماليات والفراغات
         if 'total' in cell_lower or cell_lower in ['nan', 'none', '']:
             continue
 
-        # السطر يجب أن يحتوي على رمز شهر من 6 أرقام حصراً (مثل 202107)
-        if cell_val.replace('.0', '').isdigit() and len(cell_val.replace('.0', '')) == 6:
-            code = cell_val.replace('.0', '')
-            
-            # استخراج القيم بأمان مع إسناد الصفر في حال الخلايا الفارغة
+        # التقاط أسطر الأشهر المكونة من 6 خانات (YYYYMM)
+        raw_code = cell_val.replace('.0', '')
+        if raw_code.isdigit() and len(raw_code) == 6:
             def safe_num(idx):
                 try:
                     val = str(row.iloc[idx]).replace(',', '').replace('SAR', '').strip()
@@ -99,21 +92,17 @@ def parse_raw_insurance_report(file_obj, session_id, default_members):
                 except Exception:
                     return 0.0
 
-            # تعيين القيم بناءً على ترتيب الأعمدة المعتمد
             lives = safe_num(1)
             claims_cnt = safe_num(2)
             paid_amt = safe_num(3)
             paid_vat = safe_num(4)
 
-            # تحديد سنة الوثيقة بدقة (سنة البداية الفعلية أو تصنيف الفترة)
-            year_val = code[:4]
-
             cleaned_records.append({
                 'session_id': str(session_id),
                 'created_at': pd.Timestamp.now(tz='UTC'),
-                'policy_year': str(year_val),
-                'month_code': f"{code[:4]}-{code[4:]}",
-                'month_weight': 0, # سيتم ضبطه بالتسلسل
+                'policy_year': str(current_period_tag), # مطابقة دقيقة لـ 'CY', 'PY', 'P2Y'
+                'month_code': f"{raw_code[:4]}-{raw_code[4:]}",
+                'month_weight': 1, # ضبط الوزن بـ 1 ليعطي المجموع عدد الأشهر المنقضية بالضبط
                 'class_tier': "General",
                 'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
                 'claims_count': int(claims_cnt),
@@ -123,7 +112,6 @@ def parse_raw_insurance_report(file_obj, session_id, default_members):
 
     df_result = pd.DataFrame(cleaned_records)
     if not df_result.empty:
-        df_result['month_weight'] = range(1, len(df_result) + 1)
         return df_result[EXACT_BQ_COLUMNS]
     
     return pd.DataFrame(columns=EXACT_BQ_COLUMNS)
@@ -154,7 +142,6 @@ def delete_session_data(target_session_id):
         except Exception:
             pass
 
-# نصوص الواجهة
 i18n = {
     "AR": {
         "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
@@ -165,7 +152,7 @@ i18n = {
         "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
         "upload_label": "رفع ملف تجربة المطالبات (Excel أو CSV)",
         "btn_process": "قراءة وتحليل البيانات",
-        "processing": "جاري تصفية وتجهيز البيانات آلياً دون تدخل بشري...",
+        "processing": "جاري مواءمة الفترات الاكتوارية وحساب التوقعات...",
         "success": "تمت معالجة وضخ البيانات بنجاح للجلسة: ",
         "btn_open_looker": "الانتقال المباشر إلى لوحة المؤشرات في Looker Studio",
         "warn_inputs": "يرجى تعبئة قسط الوثيقة، عدد الأفراد، وتاريخ السريان.",
@@ -182,7 +169,7 @@ i18n = {
         "members_label": "Total Covered Members (Lives)",
         "upload_label": "Upload Claims Experience (Excel or CSV)",
         "btn_process": "Process Data",
-        "processing": "Automatically parsing and purifying claims records...",
+        "processing": "Aligning actuarial periods and projecting claims...",
         "success": "Data processed successfully for session: ",
         "btn_open_looker": "Open Dashboard in Looker Studio",
         "warn_inputs": "Please enter current premium, covered members, and inception date.",
@@ -240,7 +227,6 @@ if uploaded_file:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
 
-                    # استخراج وتطهير أوتوماتيكي كامل من جهتنا
                     df_mapped = parse_raw_insurance_report(uploaded_file, session_id, total_members)
                     
                     if df_mapped.empty:
