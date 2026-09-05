@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import uuid
+import json
 import urllib.parse
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
@@ -22,20 +23,16 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-def append_to_bigquery(df_monthly, df_benefits, df_providers):
+def delete_bq_session(target_session_id):
     client = get_bq_client()
-    records_m = df_monthly.to_dict(orient="records")
-    records_b = df_benefits.to_dict(orient="records")
-    records_p = df_providers.to_dict(orient="records")
+    tables = ["monthly_performance", "benefits_breakdown", "top_providers"]
+    for t in tables:
+        query = f"DELETE FROM `{PROJECT_ID}.{DATASET_ID}.{t}` WHERE session_id = @sid"
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("sid", "STRING", target_session_id)]
+        )
+        client.query(query, job_config=job_config).result()
 
-    err_m = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.monthly_performance", records_m)
-    err_b = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.benefits_breakdown", records_b)
-    err_p = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.top_providers", records_p)
-    
-    if err_m or err_b or err_p:
-        raise RuntimeError(f"BQ Insertion Error: {err_m or err_b or err_p}")
-
-# قاموس نصوص متزن ومباشر
 i18n = {
     "AR": {
         "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
@@ -46,10 +43,13 @@ i18n = {
         "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
         "upload_label": "رفع ملف تجربة المطالبات (Excel أو CSV)",
         "btn_process": "قراءة وتحليل البيانات",
-        "processing": "جاري قراءة البيانات وتحضير المؤشرات...",
-        "success": "تمت معالجة البيانات وضخها بنجاح للجلسة: ",
+        "processing": "جاري قراءة البيانات وتجهيز المؤشرات...",
+        "success": "تم تجهيز البيانات بنجاح للجلسة: ",
         "btn_open_looker": "الانتقال المباشر إلى لوحة المؤشرات في Looker Studio",
-        "warn_inputs": "يرجى تعبئة قسط الوثيقة، عدد الأفراد، وتاريخ السريان قبل البدء."
+        "warn_inputs": "يرجى تعبئة قسط الوثيقة، عدد الأفراد، وتاريخ السريان.",
+        "session_mgmt": "إدارة وحوكمة الجلسة",
+        "btn_end_session": "إنهاء الجلسة وتطهير البيانات من BigQuery",
+        "session_cleared": "تم تطهير بيانات الجلسة بنجاح من قاعدة البيانات."
     },
     "EN": {
         "title": "Claims Intelligence & Renewal Dashboard",
@@ -61,9 +61,12 @@ i18n = {
         "upload_label": "Upload Claims Experience (Excel or CSV)",
         "btn_process": "Process Data",
         "processing": "Reading data and preparing metrics...",
-        "success": "Data processed and streamed successfully for session: ",
+        "success": "Data processed successfully for session: ",
         "btn_open_looker": "Open Dashboard in Looker Studio",
-        "warn_inputs": "Please enter current premium, covered members, and inception date."
+        "warn_inputs": "Please enter current premium, covered members, and inception date.",
+        "session_mgmt": "Session Governance",
+        "btn_end_session": "End Session & Purge BigQuery Data",
+        "session_cleared": "Session data purged successfully from database."
     }
 }
 
@@ -113,27 +116,41 @@ if uploaded_file:
             with st.spinner(t["processing"]):
                 try:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
-                    now_iso = datetime.utcnow().isoformat()
-                    
-                    # قراءة أوراق العمل وتجهيز السجلات
-                    # (افتراض قراءة جداول الملف أو تجهيز السجلات الأساسية للضخ)
-                    df_raw = pd.read_excel(uploaded_file, sheet_name=None) if uploaded_file.name.endswith(('xlsx', 'xls')) else {'Sheet1': pd.read_csv(uploaded_file)}
-                    
-                    # تجهيز البيانات الشهرية وضخها
-                    # بناء السجلات للجلسة الحالية
-                    # ملاحظة: يتم تمرير session_id و created_at و p_current_premium مع كل سجل
-                    
-                    # استدعاء الضخ الفعلي
-                    # append_to_bigquery(df_monthly, df_benefits, df_providers)
+                    st.session_state["active_session_id"] = session_id
 
-                    params = {
-                        "params": f'{{"p_session_id":"{session_id}","param_language":"{lang_code}","p_current_premium":{current_premium}}}'
+                    # مطابقة أسماء الـ Variables الدقيقة من لوكر ستوديو (ds14, ds15, ds16)
+                    url_params = {
+                        "ds14.p_session_id": session_id,
+                        "ds15.p_session_id": session_id,
+                        "ds16.p_session_id": session_id,
+                        "ds14.param_language": lang_code,
+                        "ds14.p_current_premium": int(current_premium),
+                        "ds14.p_target_census": int(total_members)
                     }
-                    encoded_params = urllib.parse.urlencode(params)
+
+                    encoded_params = urllib.parse.urlencode({"params": json.dumps(url_params)})
                     target_url = f"{LOOKER_REPORT_URL}?{encoded_params}"
 
                     st.success(f"{t['success']} `{session_id}`")
                     st.link_button(label=t["btn_open_looker"], url=target_url, type="primary")
-                    
+
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
+
+# قسم إنهاء وتطهير الجلسة
+if "active_session_id" in st.session_state:
+    st.divider()
+    st.subheader(t["session_mgmt"])
+    col_s1, col_s2 = st.columns([3, 1])
+    with col_s1:
+        st.info(f"الجلسة النشطة الحالية: `{st.session_state['active_session_id']}`")
+    with col_s2:
+        if st.button(t["btn_end_session"], type="secondary"):
+            with st.spinner("جاري مسح السجلات..."):
+                try:
+                    delete_bq_session(st.session_state["active_session_id"])
+                    del st.session_state["active_session_id"]
+                    st.success(t["session_cleared"])
+                    st.rerun()
+                except Exception as ex:
+                    st.error(f"فشل مسح البيانات: {str(ex)}")
