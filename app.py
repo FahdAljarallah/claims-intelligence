@@ -23,7 +23,20 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-def delete_bq_session(target_session_id):
+def append_to_bigquery(df_monthly, df_benefits, df_providers):
+    client = get_bq_client()
+    records_m = df_monthly.to_dict(orient="records")
+    records_b = df_benefits.to_dict(orient="records")
+    records_p = df_providers.to_dict(orient="records")
+
+    err_m = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.monthly_performance", records_m)
+    err_b = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.benefits_breakdown", records_b)
+    err_p = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.top_providers", records_p)
+    
+    if err_m or err_b or err_p:
+        raise RuntimeError(f"خطأ أثناء ضخ السجلات: {err_m or err_b or err_p}")
+
+def delete_session_data(target_session_id):
     client = get_bq_client()
     tables = ["monthly_performance", "benefits_breakdown", "top_providers"]
     for t in tables:
@@ -48,8 +61,8 @@ i18n = {
         "btn_open_looker": "الانتقال المباشر إلى لوحة المؤشرات في Looker Studio",
         "warn_inputs": "يرجى تعبئة قسط الوثيقة، عدد الأفراد، وتاريخ السريان.",
         "session_mgmt": "إدارة وحوكمة الجلسة",
-        "btn_end_session": "إنهاء الجلسة وتطهير البيانات من BigQuery",
-        "session_cleared": "تم تطهير بيانات الجلسة بنجاح من قاعدة البيانات."
+        "btn_end_session": "إنهاء الجلسة وحذف البيانات",
+        "session_cleared": "تم حذف بيانات الجلسة بنجاح وتطهير السجلات."
     },
     "EN": {
         "title": "Claims Intelligence & Renewal Dashboard",
@@ -65,8 +78,8 @@ i18n = {
         "btn_open_looker": "Open Dashboard in Looker Studio",
         "warn_inputs": "Please enter current premium, covered members, and inception date.",
         "session_mgmt": "Session Governance",
-        "btn_end_session": "End Session & Purge BigQuery Data",
-        "session_cleared": "Session data purged successfully from database."
+        "btn_end_session": "End Session & Delete Data",
+        "session_cleared": "Session data deleted and purged successfully."
     }
 }
 
@@ -117,8 +130,28 @@ if uploaded_file:
                 try:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
+                    now_iso = datetime.utcnow().isoformat()
 
-                    # مطابقة أسماء الـ Variables الدقيقة من لوكر ستوديو (ds14, ds15, ds16)
+                    # قراءة أوراق الملف
+                    if uploaded_file.name.endswith(('xlsx', 'xls')):
+                        excel_data = pd.read_excel(uploaded_file, sheet_name=None)
+                        df_m = excel_data.get('Monthly', pd.DataFrame())
+                        df_b = excel_data.get('Benefits', pd.DataFrame())
+                        df_p = excel_data.get('Providers', pd.DataFrame())
+                    else:
+                        df_raw = pd.read_csv(uploaded_file)
+                        df_m, df_b, df_p = df_raw, df_raw, df_raw
+
+                    # تطعيم الجداول بمعرف الجلسة وتوقيت الإنشاء
+                    for df in [df_m, df_b, df_p]:
+                        if not df.empty:
+                            df['session_id'] = session_id
+                            df['created_at'] = now_iso
+
+                    # الضخ الفعلي للبيانات
+                    append_to_bigquery(df_m, df_b, df_p)
+
+                    # تجهيز الرابط المحقون بالمعلمات للوكر ستوديو
                     url_params = {
                         "ds14.p_session_id": session_id,
                         "ds15.p_session_id": session_id,
@@ -135,9 +168,9 @@ if uploaded_file:
                     st.link_button(label=t["btn_open_looker"], url=target_url, type="primary")
 
                 except Exception as e:
-                    st.error(f"Error: {str(e)}")
+                    st.error(f"حدث خطأ أثناء معالجة وضخ الملف: {str(e)}")
 
-# قسم إنهاء وتطهير الجلسة
+# قسم حوكمة وإنهاء الجلسة
 if "active_session_id" in st.session_state:
     st.divider()
     st.subheader(t["session_mgmt"])
@@ -146,11 +179,11 @@ if "active_session_id" in st.session_state:
         st.info(f"الجلسة النشطة الحالية: `{st.session_state['active_session_id']}`")
     with col_s2:
         if st.button(t["btn_end_session"], type="secondary"):
-            with st.spinner("جاري مسح السجلات..."):
+            with st.spinner("جاري حذف البيانات..."):
                 try:
-                    delete_bq_session(st.session_state["active_session_id"])
+                    delete_session_data(st.session_state["active_session_id"])
                     del st.session_state["active_session_id"]
                     st.success(t["session_cleared"])
                     st.rerun()
                 except Exception as ex:
-                    st.error(f"فشل مسح البيانات: {str(ex)}")
+                    st.error(f"تعذر حذف البيانات: {str(ex)}")
