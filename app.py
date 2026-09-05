@@ -3,7 +3,9 @@ import pandas as pd
 from datetime import datetime
 import uuid
 import json
+import io
 import urllib.parse
+import pdfplumber
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
@@ -32,49 +34,58 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-# دالة رفع دفعية تستعلم عن أعمدة الجدول وتطابقها بالاسم لمنع تضارب الـ CSV
+# استخراج الجداول من ملفات الـ PDF
+def parse_pdf_claims(uploaded_pdf):
+    extracted_tables = []
+    with pdfplumber.open(uploaded_pdf) as pdf:
+        for page in pdf.pages:
+            tables = page.extract_tables()
+            for t in tables:
+                if t and len(t) > 1:
+                    df = pd.DataFrame(t[1:], columns=t[0])
+                    extracted_tables.append(df)
+    
+    if not extracted_tables:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    
+    # الجدول الأول عادة يمثل الأداء الشهري للمطالبات في تقارير شركات التأمين
+    df_monthly = extracted_tables[0]
+    df_benefits = extracted_tables[1] if len(extracted_tables) > 1 else pd.DataFrame()
+    df_providers = extracted_tables[2] if len(extracted_tables) > 2 else pd.DataFrame()
+    
+    return df_monthly, df_benefits, df_providers
+
+# مطابقة ورفع البيانات المتوافقة مجاناً مع Free Tier
 def safe_load_to_bq(client, df, table_name):
     if df.empty:
         return
     
     table_ref = f"{PROJECT_ID}.{DATASET_ID}.{table_name}"
-    df_upload = df.copy()
+    df_clean = df.copy()
     
-    # تنظيف أسماء الأعمدة وإزالة الفهارس الوهمية
-    df_upload.columns = [str(c).strip().replace(" ", "_").replace("/", "_").replace("-", "_") for c in df_upload.columns]
-    unnamed = [c for c in df_upload.columns if c.startswith("Unnamed:")]
+    # إزالة أي فهارس غير مسماة وتنظيف الرموز
+    unnamed = [c for c in df_clean.columns if str(c).startswith("Unnamed:")]
     if unnamed:
-        df_upload.drop(columns=unnamed, inplace=True)
+        df_clean.drop(columns=unnamed, inplace=True)
         
-    try:
-        # فحص مخطط الجدول الفعلي لجلب الأعمدة المطلوبة فقط وترتيبها
-        table = client.get_table(table_ref)
-        expected_cols = [schema_field.name for schema_field in table.schema]
-        
-        # إضافة أي عمود مفقود بقيمة فارغة لضمان اكتمال الصف
-        for col in expected_cols:
-            if col not in df_upload.columns:
-                df_upload[col] = None
-                
-        # إعادة ترتيب الأعمدة لتطابق ترتيب الجدول تماماً
-        df_upload = df_upload[expected_cols]
-    except Exception:
-        pass # في حال كان الجدول غير موجود سيتم إنشاؤه تلقائياً
+    df_clean.columns = [str(c).strip().replace(" ", "_").replace("/", "_").replace("-", "_") for c in df_clean.columns]
+    
+    # تنظيف المبالغ المالية من أي نصوص أو فواصل لضمان قراءتها كأرقام في BigQuery
+    for col in df_clean.columns:
+        if any(k in col.lower() for k in ['claim', 'paid', 'amount', 'incurred', 'مطالبات', 'مبلغ']):
+            try:
+                df_clean[col] = df_clean[col].astype(str).str.replace(',', '').str.replace('SAR', '').str.strip()
+                df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0.0)
+            except Exception:
+                pass
 
-    # تنفيذ مهمة التحميل المتوافقة مجاناً مع Free Tier
     job_config = bigquery.LoadJobConfig(
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
         autodetect=True
     )
-    job = client.load_table_from_dataframe(df_upload, table_ref, job_config=job_config)
+    job = client.load_table_from_dataframe(df_clean, table_ref, job_config=job_config)
     job.result()
-
-def append_to_bigquery_free_tier(df_monthly, df_benefits, df_providers):
-    client = get_bq_client()
-    safe_load_to_bq(client, df_monthly, "monthly_performance")
-    safe_load_to_bq(client, df_benefits, "benefits_breakdown")
-    safe_load_to_bq(client, df_providers, "top_providers")
 
 def delete_session_data(target_session_id):
     client = get_bq_client()
@@ -86,34 +97,35 @@ def delete_session_data(target_session_id):
         )
         client.query(query, job_config=job_config).result()
 
+# الواجهة ثنائية اللغة
 i18n = {
     "AR": {
         "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
-        "subtitle": "قم برفع ملف تجربة المطالبات لقراءة الأداء وتحديث لوحة المؤشرات فوراً.",
+        "subtitle": "قم برفع تقرير المطالبات (PDF أو Excel أو CSV) لقراءة الأداء وتحديث مؤشرات التفاوض فوراً.",
         "lang_label": "اللغة / Language",
         "date_label": "تاريخ بداية سريان الوثيقة",
         "prem_label": "قسط الوثيقة السنوي الحالي (SAR)",
         "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
-        "upload_label": "رفع ملف تجربة المطالبات (Excel أو CSV)",
+        "upload_label": "رفع ملف تجربة المطالبات (PDF / Excel / CSV)",
         "btn_process": "قراءة وتحليل البيانات",
-        "processing": "جاري قراءة البيانات وتجهيز المؤشرات...",
-        "success": "تم تجهيز البيانات بنجاح للجلسة: ",
+        "processing": "جاري استخراج البيانات وضخ السجلات وتجهيز المؤشرات...",
+        "success": "تمت معالجة البيانات وضخها بنجاح للجلسة: ",
         "btn_open_looker": "الانتقال المباشر إلى لوحة المؤشرات في Looker Studio",
         "warn_inputs": "يرجى تعبئة قسط الوثيقة، عدد الأفراد، وتاريخ السريان.",
         "session_mgmt": "إدارة وحوكمة الجلسة",
         "btn_end_session": "إنهاء الجلسة وحذف البيانات",
-        "session_cleared": "تم حذف بيانات الجلسة بنجاح وتطهير السجلات."
+        "session_cleared": "تم حذف بيانات الجلسة وتطهير السجلات بنجاح."
     },
     "EN": {
         "title": "Claims Intelligence & Renewal Dashboard",
-        "subtitle": "Upload policy claims experience to analyze performance and update metrics.",
+        "subtitle": "Upload claims experience report (PDF, Excel, CSV) to update negotiation KPIs.",
         "lang_label": "Language / اللغة",
         "date_label": "Policy Inception Date",
         "prem_label": "Current Annual Premium (SAR)",
         "members_label": "Total Covered Members (Lives)",
-        "upload_label": "Upload Claims Experience (Excel or CSV)",
+        "upload_label": "Upload Claims Experience (PDF / Excel / CSV)",
         "btn_process": "Process Data",
-        "processing": "Reading data and preparing metrics...",
+        "processing": "Extracting tables and streaming records...",
         "success": "Data processed successfully for session: ",
         "btn_open_looker": "Open Dashboard in Looker Studio",
         "warn_inputs": "Please enter current premium, covered members, and inception date.",
@@ -159,7 +171,8 @@ with col_prem:
 if current_premium:
     st.caption(f"SAR {current_premium:,.2f}")
 
-uploaded_file = st.file_uploader(t["upload_label"], type=["xlsx", "xls", "csv"])
+# دعم صيغ PDF و Excel و CSV صراحة
+uploaded_file = st.file_uploader(t["upload_label"], type=["pdf", "xlsx", "xls", "csv"])
 
 if uploaded_file:
     if st.button(t["btn_process"]):
@@ -172,9 +185,12 @@ if uploaded_file:
                     st.session_state["active_session_id"] = session_id
                     now_ts = pd.Timestamp.now(tz='UTC')
 
-                    if uploaded_file.name.endswith(('xlsx', 'xls')):
+                    file_ext = uploaded_file.name.split('.')[-1].lower()
+
+                    if file_ext == 'pdf':
+                        df_m, df_b, df_p = parse_pdf_claims(uploaded_file)
+                    elif file_ext in ['xlsx', 'xls']:
                         excel_dict = pd.read_excel(uploaded_file, sheet_name=None)
-                        # قراءة الورقة الأولى كأداء شهري إذا لم تكن المسميات مطابقة تماماً
                         sheet_names = list(excel_dict.keys())
                         df_m = excel_dict.get('Monthly', excel_dict.get('monthly_performance', excel_dict[sheet_names[0]]))
                         df_b = excel_dict.get('Benefits', excel_dict.get('benefits_breakdown', pd.DataFrame()))
@@ -188,7 +204,10 @@ if uploaded_file:
                             df['session_id'] = session_id
                             df['created_at'] = now_ts
 
-                    append_to_bigquery_free_tier(df_m, df_b, df_p)
+                    client = get_bq_client()
+                    safe_load_to_bq(client, df_m, "monthly_performance")
+                    safe_load_to_bq(client, df_b, "benefits_breakdown")
+                    safe_load_to_bq(client, df_p, "top_providers")
 
                     url_params = {
                         "ds14.p_session_id": session_id,
