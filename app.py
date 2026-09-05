@@ -1,13 +1,12 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 import uuid
 import json
 import urllib.parse
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
-# 1. تهيئة الصفحة
 st.set_page_config(
     page_title="Claims Intelligence Portal",
     page_icon="📊",
@@ -18,7 +17,6 @@ PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
 LOOKER_REPORT_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47/page/1f97F"
 
-# 2. إدارة الاتصال بـ BigQuery مع تصحيح مفتاح التشفير آلياً
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -35,24 +33,37 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
+# دالة تحويل الأعمدة والجداول إلى صياغة JSON آمنة ومقبولة سحابياً
+def prepare_df_for_bq(df):
+    if df.empty:
+        return df
+    df = df.copy()
+    for col in df.columns:
+        # تحويل التواريخ والـ Timestamps إلى نصوص ISO
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            df[col] = df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+        elif df[col].apply(lambda x: isinstance(x, (datetime, date))).any():
+            df[col] = df[col].apply(lambda x: x.isoformat() if isinstance(x, (datetime, date)) else x)
+    # استبدال القيم المفقودة بـ None لكي تتحول إلى null سليم في JSON
+    return df.where(pd.notnull(df), None)
+
 def append_to_bigquery(df_monthly, df_benefits, df_providers):
     client = get_bq_client()
     
-    # التحقق وضخ البيانات للجداول التي تحتوي على سجلات فعلية فقط
     if not df_monthly.empty:
-        records_m = df_monthly.to_dict(orient="records")
+        records_m = prepare_df_for_bq(df_monthly).to_dict(orient="records")
         err_m = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.monthly_performance", records_m)
         if err_m:
             raise RuntimeError(f"خطأ في ضخ بيانات الأداء الشهري: {err_m}")
             
     if not df_benefits.empty:
-        records_b = df_benefits.to_dict(orient="records")
+        records_b = prepare_df_for_bq(df_benefits).to_dict(orient="records")
         err_b = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.benefits_breakdown", records_b)
         if err_b:
             raise RuntimeError(f"خطأ في ضخ تفاصيل المنافع: {err_b}")
             
     if not df_providers.empty:
-        records_p = df_providers.to_dict(orient="records")
+        records_p = prepare_df_for_bq(df_providers).to_dict(orient="records")
         err_p = client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.top_providers", records_p)
         if err_p:
             raise RuntimeError(f"خطأ في ضخ مقدمي الخدمة: {err_p}")
@@ -67,7 +78,6 @@ def delete_session_data(target_session_id):
         )
         client.query(query, job_config=job_config).result()
 
-# 3. إعداد مصفوفة النصوص ثنائية اللغة
 i18n = {
     "AR": {
         "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
@@ -105,7 +115,6 @@ i18n = {
     }
 }
 
-# اختيار لغة الواجهة
 selected_lang = st.selectbox("Language / اللغة", options=["العربية", "English"], index=0)
 lang_code = "AR" if selected_lang == "العربية" else "EN"
 t = i18n[lang_code]
@@ -113,7 +122,6 @@ t = i18n[lang_code]
 st.title(t["title"])
 st.markdown(t["subtitle"])
 
-# 4. الحقول التنفيذية فارغة مسبقاً لمنع الأخطاء
 col_date, col_members = st.columns(2)
 with col_date:
     inception_date = st.date_input(t["date_label"], value=None)
@@ -145,7 +153,6 @@ if current_premium:
 
 uploaded_file = st.file_uploader(t["upload_label"], type=["xlsx", "xls", "csv"])
 
-# 5. منطق القراءة والضخ وتوليد الرابط
 if uploaded_file:
     if st.button(t["btn_process"]):
         if not current_premium or not total_members or not inception_date:
@@ -155,14 +162,12 @@ if uploaded_file:
                 try:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
-                    now_iso = datetime.utcnow().isoformat()
+                    now_iso = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
 
-                    # قراءة متكيفة لملف الإكسل لضمان عدم تمرير جداول فارغة
                     if uploaded_file.name.endswith(('xlsx', 'xls')):
                         excel_dict = pd.read_excel(uploaded_file, sheet_name=None)
                         sheet_names = list(excel_dict.keys())
                         
-                        # مطابقة أسماء الأوراق أو أخذ الورقة الأولى كبيانات شهرية أساسية
                         df_m = excel_dict.get('Monthly', excel_dict.get('monthly_performance', excel_dict[sheet_names[0]]))
                         df_b = excel_dict.get('Benefits', excel_dict.get('benefits_breakdown', pd.DataFrame()))
                         df_p = excel_dict.get('Providers', excel_dict.get('top_providers', pd.DataFrame()))
@@ -170,16 +175,14 @@ if uploaded_file:
                         df_raw = pd.read_csv(uploaded_file)
                         df_m, df_b, df_p = df_raw, pd.DataFrame(), pd.DataFrame()
 
-                    # تطعيم البيانات بمعرف الجلسة وتوقيت الإنشاء
                     for df in [df_m, df_b, df_p]:
                         if not df.empty:
                             df['session_id'] = session_id
                             df['created_at'] = now_iso
 
-                    # تنفيذ الضخ في مستودع البيانات
+                    # الضخ الآمن بعد معالجة التواريخ
                     append_to_bigquery(df_m, df_b, df_p)
 
-                    # مطابقة أسماء الـ Variables مع Looker Studio (ds14, ds15, ds16)
                     url_params = {
                         "ds14.p_session_id": session_id,
                         "ds15.p_session_id": session_id,
@@ -198,7 +201,6 @@ if uploaded_file:
                 except Exception as e:
                     st.error(f"حدث خطأ أثناء معالجة وضخ الملف: {str(e)}")
 
-# 6. قسم الحوكمة وحذف البيانات المؤقتة
 if "active_session_id" in st.session_state:
     st.divider()
     st.subheader(t["session_mgmt"])
