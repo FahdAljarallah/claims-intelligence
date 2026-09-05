@@ -51,11 +51,26 @@ COLUMN_MAPPING = {
     'paid_claims_vat_sar': ['paid_claims_vat_sar', 'gross_paid', 'vat', 'الإجمالي', 'total_with_vat']
 }
 
-# دالة ذكية لتخطي سطور ترويسة تقارير التأمين واكتشاف بداية الجدول
+# دالة تنظيف وتفرد أسماء الأعمدة لتفادي أخطاء PyArrow و Streamlit
+def deduplicate_column_names(columns):
+    seen = {}
+    new_cols = []
+    for idx, col in enumerate(columns):
+        val = str(col).strip() if pd.notnull(col) else f"col_{idx}"
+        if not val or val.lower() == 'nan' or val.lower() == 'none':
+            val = f"col_{idx}"
+        if val in seen:
+            seen[val] += 1
+            new_cols.append(f"{val}_{seen[val]}")
+        else:
+            seen[val] = 0
+            new_cols.append(val)
+    return new_cols
+
+# دالة ذكية لتخطي الأسطر الوصفية والتقاط بداية جدول المطالبات الفعلي
 def find_table_header_and_read(file_obj):
     if file_obj.name.endswith(('xlsx', 'xls')):
         excel_data = pd.read_excel(file_obj, sheet_name=None, header=None)
-        # البحث في الورقة التي تحتوي على كلمة Monthly أو الورقة الأولى
         target_sheet = list(excel_data.keys())[0]
         for name in excel_data.keys():
             if 'month' in name.lower():
@@ -65,22 +80,38 @@ def find_table_header_and_read(file_obj):
     else:
         raw_df = pd.read_csv(file_obj, header=None)
 
-    # البحث عن السطر الذي يحتوي على أسماء الحقول التشغيلية
+    # البحث عن السطر الفعلي الذي يبدأ منه جدول المطالبات
     header_idx = 0
-    for idx, row in raw_df.head(20).iterrows():
-        row_str = " ".join([str(val).lower() for val in row.values])
-        if any(k in row_str for k in ['month', 'paid', 'claim', 'incurred', 'شـهر', 'مطالب']):
+    found_table = False
+    for idx, row in raw_df.head(30).iterrows():
+        row_str = " ".join([str(val).lower() for val in row.values if pd.notnull(val)])
+        # استبعاد سطور الترويسة التعريفية (Inception / CR / Sponsor)
+        if any(skip_word in row_str for skip_word in ['inception date', 'cr number', 'sponsor number', 'group name']):
+            continue
+        # التقاط سطر ترويسة الجدول الحقيقي
+        if any(k in row_str for k in ['month', 'paid', 'claim', 'incurred', 'مطالبات', 'مسددة', 'net']):
             header_idx = idx
+            found_table = True
             break
 
-    # إعادة قراءة البيانات مع اعتماد السطر المكتشف كترويسة
-    raw_df.columns = raw_df.iloc[header_idx]
-    df_data = raw_df.iloc[header_idx + 1:].copy().dropna(how='all')
-    return df_data
+    if found_table:
+        header_row = raw_df.iloc[header_idx].values
+        clean_columns = deduplicate_column_names(header_row)
+        df_data = raw_df.iloc[header_idx + 1:].copy()
+        df_data.columns = clean_columns
+    else:
+        # في حال عدم العثور، استخدام الترقيم الافتراضي مع تفرد الأعمدة
+        df_data = raw_df.copy()
+        df_data.columns = deduplicate_column_names(df_data.columns)
+
+    return df_data.dropna(how='all')
 
 def map_and_clean_df(df, session_id, default_members):
     df_clean = df.copy()
-    cleaned_col_lookup = {str(c).strip().lower().replace(" ", "_").replace("/", "_").replace("-", "_"): c for c in df_clean.columns}
+    cleaned_col_lookup = {
+        str(c).strip().lower().replace(" ", "_").replace("/", "_").replace("-", "_"): c 
+        for c in df_clean.columns
+    }
     
     mapped_data = pd.DataFrame()
     mapped_data['session_id'] = [str(session_id)] * len(df_clean)
@@ -215,8 +246,8 @@ uploaded_file = st.file_uploader(t["upload_label"], type=["xlsx", "xls", "csv"])
 
 if uploaded_file:
     df_raw = find_table_header_and_read(uploaded_file)
-    with st.expander("🔍 معاينة أعمدة الجدول المكتشفة بعد تخطي الترويسة", expanded=True):
-        st.write("أعمدة الجدول الفعلي:", list(df_raw.columns))
+    with st.expander("🔍 معاينة أعمدة الجدول المكتشفة", expanded=False):
+        st.write("أعمدة الجدول المعالجة:", list(df_raw.columns))
         st.dataframe(df_raw.head(3))
 
     if st.button(t["btn_process"]):
