@@ -9,6 +9,7 @@ import pdfplumber
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
+# 1. إعداد واجهة التطبيق
 st.set_page_config(
     page_title="Claims Intelligence Portal",
     page_icon="📊",
@@ -19,6 +20,7 @@ PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
 LOOKER_REPORT_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47/page/1f97F"
 
+# 2. إعداد الاتصال بمستودع بيانات BigQuery
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -33,6 +35,7 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
+# الأعمدة المعتمدة المطابقة لجدول BigQuery
 EXACT_BQ_COLUMNS = [
     'session_id', 'created_at', 'policy_year', 'policy_year_label', 'month_code', 
     'month_weight', 'class_tier', 'active_lives', 'claims_count', 
@@ -40,92 +43,91 @@ EXACT_BQ_COLUMNS = [
 ]
 
 def safe_clean_number(val):
+    """تنظيف دقيق يحمي الأرقام التي تحتوي على نقاط كفواصل آلاف أو فواصل عادية"""
     if pd.isna(val) or val is None:
         return 0.0
-    val_str = str(val).replace(',', '').replace('SAR', '').replace('ر.س', '').strip()
+    val_str = str(val).replace('SAR', '').replace('ر.س', '').replace(',', '').strip()
+    
+    # معالجة النصوص ذات النقاط المكررة مثل 598.080.85 -> 598080.85
+    if val_str.count('.') > 1:
+        parts = val_str.rsplit('.', 1)
+        val_str = parts[0].replace('.', '') + '.' + parts[1]
+        
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
 def parse_pdf_claims(file_obj, session_id, default_members):
-    """استخراج مصفوفة الأداء الشهري وتفكيك التواريخ من صفحات الـ PDF"""
+    """استخراج مصفوفة الأداء الشهري سطراً بسطر لضمان التقاط كامل الشهور دون انزياح"""
     cleaned_records = []
-    current_period_tag = "CY"
-    detected_class = "VIP"
-
+    
     with pdfplumber.open(file_obj) as pdf:
-        for page_idx, page in enumerate(pdf.pages):
-            text_lower = page.extract_text().lower() if page.extract_text() else ""
-            
-            # فحص فئة الوثيقة
-            if "vip" in text_lower:
-                detected_class = "VIP"
-            elif "class a" in text_lower:
-                detected_class = "Class A"
-            elif "class b" in text_lower:
-                detected_class = "Class B"
-
-            # فحص السنة التعاقدية (التعاونية تقسم السنتين في صفحات منفصلة عادة: ص1 وص3)
-            if "last policy year" in text_lower or page_idx == 0:
-                current_period_tag = "CY"
-            elif "prior policy year" in text_lower or "prior year" in text_lower or page_idx >= 2:
-                current_period_tag = "PY"
-
-            tables = page.extract_tables()
-            for table in tables:
-                for row in table:
-                    if not row or len(row) < 5:
-                        continue
+        pages_to_check = [
+            (0, "CY", "2024 / 2025"),
+            (2, "PY", "2023 / 2024")
+        ]
+        
+        for page_idx, period_tag, default_label in pages_to_check:
+            if len(pdf.pages) <= page_idx:
+                continue
+                
+            page_text = pdf.pages[page_idx].extract_text()
+            if not page_text:
+                continue
+                
+            for line in page_text.split('\n'):
+                line_clean = line.strip()
+                
+                # استبعاد أسطر الترويسة، الإجماليات، وتواريخ إصدار التقرير
+                if any(kw in line_clean.lower() for kw in ['report date', 'total', 'inception', 'expiry', 'period']):
+                    continue
+                
+                # رصد نمط أسطر الشهور: [Month/Year] [Lives] [Claims] [Paid Before VAT] [Paid After VAT]
+                match = re.search(r'^(0[1-9]|1[0-2])[\/\-](20\d{2})\s+(\d+)\s+(\d+)\s+([\d\.,]+)\s+([\d\.,]+)', line_clean)
+                
+                # معالجة الأسطر التي تتضمن رقم تسلسلي (مثل 12/2024 1 229 ...)
+                if not match:
+                    match = re.search(r'^(0[1-9]|1[0-2])[\/\-](20\d{2})\s+\d+\s+(\d+)\s+(\d+)\s+([\d\.,]+)\s+([\d\.,]+)', line_clean)
+                
+                if match:
+                    month_num = match.group(1)
+                    year_num = match.group(2)
+                    std_month_code = f"{year_num}-{month_num}"
                     
-                    row_clean = [str(c).strip().replace('\n', ' ') if c is not None else '' for c in row]
-                    cell_0 = row_clean[0]
-                    cell_1 = row_clean[1] if len(row_clean) > 1 else ''
-
-                    # رصد كود الشهر بصيغة MM/YYYY (مثل 12/2024 أو 01/2025)
-                    date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2}|\d{2})\b', cell_0) or \
-                                 re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2}|\d{2})\b', cell_1)
-
-                    if date_match:
-                        raw_date = date_match.group()
-                        is_c0_date = (raw_date == cell_0)
-                        
-                        # استخراج الأجزاء لتشكيل YYYY-MM المتوافق
-                        parts = re.split(r'[\/\-]', raw_date)
-                        month_part = parts[0].zfill(2)
-                        year_part = parts[1] if len(parts[1]) == 4 else f"20{parts[1]}"
-                        std_month_code = f"{year_part}-{month_part}"
-
-                        lives = safe_clean_number(row_clean[1] if is_c0_date else row_clean[2])
-                        claims_cnt = safe_clean_number(row_clean[2] if is_c0_date else row_clean[3])
-                        paid_amt = safe_clean_number(row_clean[3] if is_c0_date else row_clean[4])
-                        paid_vat = safe_clean_number(row_clean[4] if is_c0_date and len(row_clean) > 4 else (row_clean[5] if len(row_clean) > 5 else paid_amt))
-
+                    lives = safe_clean_number(match.group(3))
+                    claims_cnt = safe_clean_number(match.group(4))
+                    amt_before_vat = safe_clean_number(match.group(5))
+                    amt_after_vat = safe_clean_number(match.group(6))
+                    
+                    if claims_cnt > 0 or amt_before_vat > 0:
                         cleaned_records.append({
                             'session_id': str(session_id),
                             'created_at': pd.Timestamp.now(tz='UTC'),
-                            'policy_year': str(current_period_tag),
+                            'policy_year': period_tag,
+                            'policy_year_label': default_label,
                             'month_code': std_month_code,
                             'month_weight': 1,
-                            'class_tier': str(detected_class),
+                            'class_tier': "VIP",
                             'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
                             'claims_count': int(claims_cnt),
-                            'paid_claims_sar': paid_amt,
-                            'paid_claims_vat_sar': paid_vat
+                            'paid_claims_sar': amt_before_vat,      # صافي المطالبات قبل الضريبة
+                            'paid_claims_vat_sar': amt_after_vat    # المطالبات بعد الضريبة
                         })
 
     return cleaned_records
 
 def parse_raw_insurance_report(file_obj, session_id, default_members):
-    # مسار ملفات PDF
+    # 1. معالجة ملفات PDF
     if file_obj.name.lower().endswith('.pdf'):
         records = parse_pdf_claims(file_obj, session_id, default_members)
         df_result = pd.DataFrame(records)
         if not df_result.empty:
+            # اشتقاق ملصق سنة الوثيقة ديناميكياً بناءً على أصغر شهر
             min_months = df_result.groupby('policy_year')['month_code'].transform('min')
             df_result['policy_year_label'] = min_months.apply(lambda m: f"{str(m)[:4]} / {int(str(m)[:4]) + 1}")
             return df_result[EXACT_BQ_COLUMNS]
         return pd.DataFrame(columns=EXACT_BQ_COLUMNS)
 
-    # مسار ملفات Excel و CSV
+    # 2. معالجة ملفات Excel و CSV
     if file_obj.name.endswith(('xlsx', 'xls')):
         excel_data = pd.read_excel(file_obj, sheet_name=None, header=None)
         target_sheet = list(excel_data.keys())[0]
@@ -137,7 +139,7 @@ def parse_raw_insurance_report(file_obj, session_id, default_members):
     else:
         raw_df = pd.read_csv(file_obj, header=None)
 
-    # 1. استخراج فئة الوثيقة التعاقدية
+    # تحديد فئة الوثيقة
     detected_class = "Class A"
     for idx, row in raw_df.head(10).iterrows():
         for c_idx, val in enumerate(row.values):
@@ -146,7 +148,7 @@ def parse_raw_insurance_report(file_obj, session_id, default_members):
                     detected_class = f"Class {str(row.values[c_idx + 1]).strip()}"
                     break
 
-    # 2. رصد ترويسة الجدول
+    # رصد ترويسة الجدول
     header_idx = 10
     for idx, row in raw_df.head(25).iterrows():
         row_str = " ".join([str(val).lower() for val in row.values if pd.notnull(val)])
@@ -160,7 +162,6 @@ def parse_raw_insurance_report(file_obj, session_id, default_members):
     cleaned_records = []
     current_period_tag = "P2Y"
 
-    # 3. قراءة البيانات وحصر الشهور
     for _, row in data_rows.iterrows():
         cell_val = str(row.iloc[first_col_idx]).strip()
         cell_lower = cell_val.lower()
@@ -205,6 +206,7 @@ def parse_raw_insurance_report(file_obj, session_id, default_members):
     
     return pd.DataFrame(columns=EXACT_BQ_COLUMNS)
 
+# 3. دالة ضخ البيانات إلى BigQuery
 def append_to_bigquery_free_tier(df_mapped):
     if df_mapped.empty:
         return
@@ -219,6 +221,7 @@ def append_to_bigquery_free_tier(df_mapped):
     job = client.load_table_from_dataframe(df_mapped, table_ref, job_config=job_config)
     job.result()
 
+# 4. دالة حذف وحوكمة الجلسة
 def delete_session_data(target_session_id):
     client = get_bq_client()
     tables = ["monthly_performance", "benefits_breakdown", "top_providers"]
@@ -232,6 +235,7 @@ def delete_session_data(target_session_id):
         except Exception:
             pass
 
+# 5. نصوص الواجهة والترجمة
 i18n = {
     "AR": {
         "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
@@ -269,6 +273,7 @@ i18n = {
     }
 }
 
+# 6. بناء عناصر واجهة المستخدم
 selected_lang = st.selectbox("Language / اللغة", options=["العربية", "English"], index=0)
 lang_code = "AR" if selected_lang == "العربية" else "EN"
 t = i18n[lang_code]
@@ -314,16 +319,20 @@ if uploaded_file:
         else:
             with st.spinner(t["processing"]):
                 try:
+                    # توليد معرّف الجلسة تلقائياً في الخلفية
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
 
+                    # استخراج وتوحيد البيانات
                     df_mapped = parse_raw_insurance_report(uploaded_file, session_id, total_members)
                     
                     if df_mapped.empty:
                         raise ValueError("لم يتم العثور على أسطر مطالبات صالحة داخل الملف.")
 
+                    # الرفع إلى BigQuery
                     append_to_bigquery_free_tier(df_mapped)
 
+                    # إعداد معلمات التصفية والتوجيه إلى Looker Studio
                     url_params = {
                         "ds14.p_session_id": session_id,
                         "ds14.param_language": lang_code,
@@ -340,6 +349,7 @@ if uploaded_file:
                 except Exception as e:
                     st.error(f"حدث خطأ أثناء معالجة الملف: {str(e)}")
 
+# قسم حوكمة وإلغاء الجلسة
 if "active_session_id" in st.session_state:
     st.divider()
     st.subheader(t["session_mgmt"])
