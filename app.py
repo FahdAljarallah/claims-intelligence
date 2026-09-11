@@ -1,131 +1,174 @@
 import streamlit as st
 import pandas as pd
 import pdfplumber
-import plotly.express as px
+import re
+from google.cloud import bigquery
+from google.oauth2 import service_account
 
-st.set_page_config(page_title="Executive Renewal & Claims Engine", layout="wide")
+st.set_page_config(page_title="Universal Claims Ingestion Engine", layout="centered")
 
-st.title("محرك القرارات التنفيذية لتجديد التأمين الطبي | Renewal Intelligence")
-st.markdown("تشخيص التضخم المالي، كشف تركز مقدمي الخدمة، ومحاكاة قرارات إعادة هيكلة المنافع.")
+st.title("بوابة معالجة وضخ بيانات المطالبات (قبل الضريبة)")
+st.markdown("محرك مرن لاستخراج الجداول من مختلف تقارير التأمين وضخها إلى Google BigQuery.")
 
-uploaded_file = st.sidebar.file_uploader("ارفع نموذج تجربة المطالبات (PDF)", type=["pdf"])
+# 1. إعداد الاتصال بـ BigQuery
+PROJECT_ID = st.secrets.get("GCP_PROJECT_ID", "claims-intelligence-507611")
+DATASET_ID = "claims_intelligence"
 
-def clean_numeric(val):
-    """تنظيف النصوص وتحويلها إلى قيم رقمية دقيقة"""
+def get_bq_client():
+    if "gcp_service_account" in st.secrets:
+        creds = service_account.Credentials.from_service_account_info(st.secrets["gcp_service_account"])
+        return bigquery.Client(credentials=creds, project=PROJECT_ID)
+    return bigquery.Client(project=PROJECT_ID)
+
+# 2. تنظيف الأرقام واستبعاد أي تشويش نصي
+def parse_number(val):
     if pd.isna(val) or val is None:
         return 0.0
     val_str = str(val).replace(',', '').replace('SAR', '').replace('ر.س', '').strip()
-    try:
-        return float(val_str)
-    except ValueError:
-        return 0.0
+    match = re.search(r'[-+]?\d*\.?\d+', val_str)
+    return float(match.group()) if match else 0.0
 
-def parse_tawuniya_pdf(file):
-    """استخراج الجداول الأساسية من الصفحات المحددة"""
-    monthly_records = []
-    benefit_records = []
-    top_providers = []
+# 3. محرك الاستخراج المرن (يتعرف على المحتوى بدلالة النصوص وليس موقع الصفحة)
+def extract_universal_tables(pdf_file, session_id="SESS_DEFAULT", policy_year="2024/2025"):
+    monthly_rows = []
+    benefit_rows = []
+    provider_rows = []
 
-    with pdfplumber.open(file) as pdf:
-        # 1. الصفحة الأولى: جدول الاستهلاك الشهري للسنة الأخيرة
-        if len(pdf.pages) >= 1:
-            tables_p1 = pdf.pages[0].extract_tables()
-            for table in tables_p1:
-                for row in table:
-                    # تصفية أسطر الأشهر مثل 12/2024 أو 01/2025
-                    if row and len(row) >= 5 and any('/' in str(c) for c in row[:2]):
-                        month_label = str(row[0]).strip() if '/' in str(row[0]) else str(row[1]).strip()
-                        claims_count = clean_numeric(row[2]) if len(row) > 2 else 0
-                        paid_after_vat = clean_numeric(row[4]) if len(row) > 4 else 0
-                        monthly_records.append({
-                            'Month': month_label,
-                            'Claims_Count': claims_count,
-                            'Paid_After_VAT': paid_after_vat
-                        })
+    benefit_keywords = [
+        'outpatient', 'inpatient', 'in patient', 'dental', 'optical', 
+        'maternity', 'pharmacy', 'lab', 'consultation', 'عيادات', 'تنويم', 'أسنان', 'بصريات'
+    ]
+    
+    provider_keywords = [
+        'hospital', 'center', 'clinic', 'pharmac', 'optics', 'dr.', 
+        'مستشفى', 'مركز', 'مجمع', 'صيدلية', 'نظارات', 'د.'
+    ]
 
-        # 2. الصفحة الثانية: تفصيل المنافع وكبار مقدمي الخدمة
-        if len(pdf.pages) >= 2:
-            tables_p2 = pdf.pages[1].extract_tables()
-            for table in tables_p2:
+    with pdfplumber.open(pdf_file) as pdf:
+        for page_idx, page in enumerate(pdf.pages):
+            tables = page.extract_tables()
+            for table in tables:
                 for row in table:
                     if not row or len(row) < 3:
                         continue
-                    first_col = str(row[0]).strip()
-                    # رصد جدول المنافع
-                    if any(b in first_col for b in ['OutPatient', 'In Patient', 'Dental', 'Optical', 'Maternity', 'OP Lab', 'OP Consultain', 'OP Pharmacy']):
-                        benefit_records.append({
-                            'Benefit': first_col,
-                            'Paid_After_VAT': clean_numeric(row[2]) if len(row) > 2 else 0
+                    
+                    # تنظيف الخلايا
+                    row_clean = [str(c).strip().replace('\n', ' ') if c is not None else '' for c in row]
+                    first_cell = row_clean[0].lower()
+                    second_cell = row_clean[1].lower() if len(row_clean) > 1 else ''
+
+                    # 1. رصد الأداء الشهري (تاريخ بصيغة شهر/سنة مثل 12/2024 أو 2024-12)
+                    date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2}|\d{2})\b', row_clean[0]) or \
+                                 re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2}|\d{2})\b', second_cell)
+                    if date_match and len(row_clean) >= 4:
+                        monthly_rows.append({
+                            'session_id': session_id,
+                            'policy_year': policy_year,
+                            'month_code': date_match.group(),
+                            'active_lives': int(parse_number(row_clean[1])) if date_match.group() == row_clean[0] else int(parse_number(row_clean[2])),
+                            'claims_count': int(parse_number(row_clean[2])) if date_match.group() == row_clean[0] else int(parse_number(row_clean[3])),
+                            # سحب القيمة قبل الضريبة (Before VAT)
+                            'paid_claims_sar': parse_number(row_clean[3]) if date_match.group() == row_clean[0] else parse_number(row_clean[4]),
+                            'paid_claims_vat_sar': parse_number(row_clean[4]) if date_match.group() == row_clean[0] and len(row_clean) > 4 else parse_number(row_clean[5]) if len(row_clean) > 5 else 0.0,
+                            'created_at': pd.Timestamp.now()
                         })
-                    # رصد جدول مقدمي الخدمة
-                    elif any(p in first_col for p in ['Hospital', 'Center', 'Optics', 'Pharmacies', 'Medical', 'Dr.', 'Dallah', 'Alnahdi', 'Magrabi']):
-                        top_providers.append({
-                            'Provider': first_col.replace('\n', ' '),
-                            'Claims_Count': clean_numeric(row[1]) if len(row) > 1 else 0,
-                            'Paid_After_VAT': clean_numeric(row[2]) if len(row) > 2 else 0
+                        continue
+
+                    # 2. رصد جدول تفصيل المنافع
+                    if any(kw in first_cell for kw in benefit_keywords):
+                        benefit_name = row_clean[0]
+                        claims_cnt = int(parse_number(row_clean[1])) if len(row_clean) > 1 and row_clean[1].replace(',', '').isdigit() else 0
+                        # القيمة قبل الضريبة تسبق دائماً قيمة ما بعد الضريبة
+                        amt_before_vat = parse_number(row_clean[2]) if len(row_clean) > 2 else parse_number(row_clean[1])
+                        amt_after_vat = parse_number(row_clean[3]) if len(row_clean) > 3 else amt_before_vat
+                        
+                        benefit_rows.append({
+                            'session_id': session_id,
+                            'policy_year': policy_year,
+                            'benefit_name': benefit_name,
+                            'claims_count': claims_cnt,
+                            'paid_claims_sar': amt_before_vat,
+                            'paid_claims_vat_sar': amt_after_vat,
+                            'avg_cost_per_benefit_claim': (amt_before_vat / claims_cnt) if claims_cnt > 0 else 0.0,
+                            'created_at': pd.Timestamp.now()
+                        })
+                        continue
+
+                    # 3. رصد جدول كبار مقدمي الخدمة
+                    if any(kw in first_cell for kw in provider_keywords):
+                        prov_claims = int(parse_number(row_clean[1])) if len(row_clean) > 1 else 0
+                        prov_before_vat = parse_number(row_clean[2]) if len(row_clean) > 2 else 0.0
+                        prov_after_vat = parse_number(row_clean[3]) if len(row_clean) > 3 else prov_before_vat
+                        
+                        provider_rows.append({
+                            'session_id': session_id,
+                            'policy_year': policy_year,
+                            'provider_name': row_clean[0],
+                            'claims_count': prov_claims,
+                            'paid_claims_sar': prov_before_vat,
+                            'paid_claims_vat_sar': prov_after_vat,
+                            'created_at': pd.Timestamp.now()
                         })
 
-    return pd.DataFrame(monthly_records), pd.DataFrame(benefit_records), pd.DataFrame(top_providers)
+    df_m = pd.DataFrame(monthly_rows)
+    df_b = pd.DataFrame(benefit_rows)
+    df_p = pd.DataFrame(provider_rows)
 
-# التنفيذ وعرض النتائج
+    # حساب ترتيب وحصة مقدم الخدمة قبل الضريبة إذا توفرت بيانات
+    if not df_p.empty and 'paid_claims_sar' in df_p.columns:
+        total_p_spend = df_p['paid_claims_sar'].sum()
+        df_p['rank'] = df_p['paid_claims_sar'].rank(ascending=False, method='min').astype(int)
+        df_p['provider_tier_share'] = (df_p['paid_claims_sar'] / total_p_spend) if total_p_spend > 0 else 0.0
+
+    return df_m, df_b, df_p
+
+# 4. دالة الرفع إلى BigQuery
+def append_to_bq(client, df, table_name):
+    if df.empty:
+        return 0
+    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{table_name}"
+    job_config = bigquery.LoadJobConfig(
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+    )
+    job = client.load_table_from_dataframe(df, table_ref, job_config=job_config)
+    job.result()
+    return len(df)
+
+# 5. واجهة الاستخدام والاختبار
+col_s1, col_s2 = st.columns(2)
+with col_s1:
+    session_input = st.text_input("معرّف الجلسة (session_id)", value="RUN_2026_01")
+with col_s2:
+    year_input = st.text_input("سنة الوثيقة (policy_year)", value="2024/2025")
+
+uploaded_file = st.file_uploader("ارفع أي تقرير تجربة مطالبات (PDF)", type=["pdf"])
+
 if uploaded_file:
-    with st.spinner("جاري قراءة وتفكيك الجداول المالية والتشغيلية..."):
-        df_monthly, df_benefits, df_providers = parse_tawuniya_pdf(uploaded_file)
-
-    # 1. بطاقة المؤشرات التنفيذية (Executive Scorecard)
-    st.subheader("1. التشخيص المالي السنوي (Executive Scorecard)")
+    df_m, df_b, df_p = extract_universal_tables(uploaded_file, session_input, year_input)
     
-    # احتساب الإجماليات من البيانات المستخرجة
-    total_spend = df_monthly['Paid_After_VAT'].sum() if not df_monthly.empty else 5743130.60
-    total_claims = df_monthly['Claims_Count'].sum() if not df_monthly.empty else 6417
+    st.subheader("نتائج فحص واستخراج البيانات (قبل الضريبة - Before VAT)")
     
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("إجمالي المطالبات المدفوعة", f"{total_spend:,.0f} SAR", "+44.7% تضخم سنوي")
-    col2.metric("عدد المطالبات المغلقة", f"{total_claims:,.0f}", "+98% زيادة تردد")
-    col3.metric("متوسط تكلفة المطالبة", f"{(total_spend / total_claims if total_claims else 0):,.0f} SAR", "تراجع حدة التكلفة")
-    col4.metric("نسبة التحمل التعاقدية (Copay)", "0% (Nil)", "سبب رئيسي للهدر")
+    tab1, tab2, tab3 = st.tabs(["الأداء الشهري", "تفصيل المنافع", "كبار مقدمي الخدمة"])
+    
+    with tab1:
+        st.write(f"عدد السجلات المكتشفة: {len(df_m)}")
+        st.dataframe(df_m)
+        
+    with tab2:
+        st.write(f"عدد المنافع المكتشفة: {len(df_b)}")
+        st.dataframe(df_b)
+        
+    with tab3:
+        st.write(f"عدد مقدمي الخدمة المكتشفين: {len(df_p)}")
+        st.dataframe(df_p)
 
-    st.markdown("---")
-
-    # 2. التحليل التفصيلي للإنفاق ومقدمي الخدمة
-    c_left, c_right = st.columns(2)
-
-    with c_left:
-        st.subheader("توزيع الإنفاق حسب المنفعة (Benefit Breakdown)")
-        if not df_benefits.empty:
-            fig_b = px.pie(df_benefits, values='Paid_After_VAT', names='Benefit', hole=0.45)
-            st.plotly_chart(fig_b, use_container_width=True)
-        else:
-            st.info("لم يتم العثور على جدول المنافع تلقائياً من الصفحة.")
-
-    with c_right:
-        st.subheader("تركز مقدمي الخدمة (Top Utilized Providers)")
-        if not df_providers.empty:
-            top_10_providers = df_providers.sort_values(by='Paid_After_VAT', ascending=True).tail(8)
-            fig_p = px.bar(top_10_providers, x='Paid_After_VAT', y='Provider', orientation='h', color='Paid_After_VAT', color_continuous_scale='Blues')
-            st.plotly_chart(fig_p, use_container_width=True)
-        else:
-            st.info("لم يتم العثور على جدول مقدمي الخدمة تلقائياً.")
-
-    st.markdown("---")
-
-    # 3. محاكي قرارات التجديد (ROI Scenario Simulator)
-    st.subheader("2. محاكي الأثر المالي للتفاوض وإعادة تصميم المنافع (Renewal Simulator)")
-    sim1, sim2 = st.columns(2)
-
-    with sim1:
-        copay_slider = st.slider("نسبة التحمل المقترحة للعيادات والمختبرات (Copay %)", min_value=0, max_value=25, value=15, step=5)
-        lab_control = st.checkbox("حوكمة الفحوصات المخبرية غير الطارئة وتحديد تكرارها", value=True)
-
-    with sim2:
-        # مطالبات العيادات والمختبرات تشكل قرابة 84% من إجمالي المطالبات
-        op_estimated_spend = total_spend * 0.84
-        copay_savings = op_estimated_spend * (copay_slider / 100.0) * 1.30
-        lab_savings = (total_spend * 0.32) * 0.15 if lab_control else 0.0
-        total_projected_savings = copay_savings + lab_savings
-
-        st.metric("الوفر المالي المتوقع عند التجديد", f"{total_projected_savings:,.0f} SAR")
-        st.success(f"يوفر هذا التعديل خفضاً تفاوضياً يعادل **{(total_projected_savings / total_spend) * 100:.1f}%** من إجمالي تكلفة البوليصة.")
-
-else:
-    st.info("ارفع ملف الـ PDF الخاص بالتعاونية لتشغيل التحليل المالي فوراً.")
+    if st.button("تأكيد وضخ البيانات إلى BigQuery"):
+        with st.spinner("جاري الضخ إلى Google BigQuery..."):
+            try:
+                bq_client = get_bq_client()
+                n_m = append_to_bq(bq_client, df_m, "monthly_performance")
+                n_b = append_to_bq(bq_client, df_b, "benefits_breakdown")
+                n_p = append_to_bq(bq_client, df_p, "top_providers")
+                st.success(f"تم الإرسال بنجاح! ({n_m} شهري، {n_b} منافع، {n_p} مقدمي خدمة) - المبالغ المعتمدة خالية من الضريبة.")
+            except Exception as e:
+                st.error(f"فشل الاتصال بـ BigQuery: {str(e)}")
