@@ -9,7 +9,7 @@ import pdfplumber
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
-# 1. إعداد الصفحة التنفيذية
+# 1. إعداد واجهة التطبيق
 st.set_page_config(
     page_title="Claims Intelligence Portal",
     page_icon="📊",
@@ -35,7 +35,7 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-# الأعمدة الصارمة المطابقة لمخطط جدول BigQuery
+# الأعمدة الصارمة المطابقة لجدول BigQuery
 EXACT_BQ_COLUMNS = [
     'session_id', 'created_at', 'policy_year', 'policy_year_label', 'month_code', 
     'month_weight', 'class_tier', 'active_lives', 'claims_count', 
@@ -170,7 +170,7 @@ def parse_excel_or_csv(file_obj, session_id, default_members):
 
     return cleaned_records
 
-# 5. منطق اشتقاق سنوات الوثيقة ديناميكياً (أصغر شهر لكل دورة)
+# 5. منطق فصل الدورات التعاقدية وعزل السنوات (CY vs PY) بدقة
 def process_all_files(uploaded_files, session_id, default_members):
     all_records = []
     for f in uploaded_files:
@@ -185,7 +185,7 @@ def process_all_files(uploaded_files, session_id, default_members):
 
     df = pd.DataFrame(all_records)
     
-    # دمج الفئات لنفس الشهر وجمع المبالغ
+    # تجميع الفئات لنفس الشهر وجمع مبالغ المطالبات الصافية
     df = df.groupby(['session_id', 'month_code', 'class_tier'], as_index=False).agg({
         'created_at': 'first',
         'month_weight': 'first',
@@ -195,22 +195,26 @@ def process_all_files(uploaded_files, session_id, default_members):
         'paid_claims_vat_sar': 'sum'
     })
 
-    # ترتيب الشهور زمنياً لاكتشاف الفجوات التعاقدية
+    # تحويل الشهر لتاريخ لفرز التسلسل الزمني
     df['period_date'] = pd.to_datetime(df['month_code'], format='%Y-%m')
     df = df.sort_values('period_date').reset_index(drop=True)
     
-    # أي قفزة تزيد عن 35 يوماً تعتبر بداية سنة تعاقدية جديدة
-    df['year_group'] = (df['period_date'].diff().dt.days > 35).cumsum()
+    # تقسيم الشهور إلى دورات تعاقدية مستقلة (كل 12 شهراً أو عند ارتداد رقم الشهر)
+    df['month_num'] = df['period_date'].dt.month
+    df['is_new_cycle'] = (df['month_num'] <= df['month_num'].shift(1)).fillna(False)
+    df['cycle_id'] = df['is_new_cycle'].cumsum()
     
-    # توليد ملصق السنة ديناميكياً من أصغر شهر في كل دورة
-    group_min_year = df.groupby('year_group')['period_date'].transform('min').dt.year
-    df['policy_year_label'] = group_min_year.astype(str) + " / " + (group_min_year + 1).astype(str)
+    # تحديد سنة البداية لكل دورة لاشتقاق التسمية (مثل 2024 / 2025)
+    cycle_min_year = df.groupby('cycle_id')['period_date'].transform('min').dt.year
+    df['policy_year_label'] = cycle_min_year.astype(str) + " / " + (cycle_min_year + 1).astype(str)
     
-    # إسناد CY للدورة الأحدث و PY للدورة السابقة
-    max_group = df['year_group'].max()
-    df['policy_year'] = df['year_group'].apply(lambda g: 'CY' if g == max_group else ('PY' if g == max_group - 1 else 'P2Y'))
+    # إسناد CY للدورة الأحدث زمنياً، و PY للدورة السابقة، و P2Y للأقدم
+    latest_cycle = df['cycle_id'].max()
+    df['policy_year'] = df['cycle_id'].apply(
+        lambda c: 'CY' if c == latest_cycle else ('PY' if c == latest_cycle - 1 else 'P2Y')
+    )
     
-    df = df.drop(columns=['period_date', 'year_group'])
+    df = df.drop(columns=['period_date', 'month_num', 'is_new_cycle', 'cycle_id'])
     return df[EXACT_BQ_COLUMNS]
 
 # 6. الرفع إلى BigQuery وحوكمة الجلسة
