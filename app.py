@@ -53,7 +53,7 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# 3. محرك استخراج البيانات من ملفات الـ PDF (التعاونية وميدغلف)
+# 3. محرك استخراج البيانات من ملفات الـ PDF
 def parse_pdf_claims(file_obj, session_id, default_members):
     cleaned_records = []
     
@@ -80,7 +80,7 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                 if any(kw in line_clean.lower() for kw in ['report date', 'total', 'subtotal', 'period', 'limit']):
                     continue
                 
-                # رصد نمط الشهر والسنة (MM/YYYY) في السطر
+                # رصد نمط الشهر والسنة (MM/YYYY)
                 date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line_clean)
                 if date_match:
                     month_num = date_match.group(1).zfill(2)
@@ -91,30 +91,37 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                     tokens = [t.strip() for t in line_without_date.split() if t.strip()]
                     numeric_values = [safe_clean_number(t) for t in tokens if safe_clean_number(t) > 0 or t == '0']
                     
-                    if len(numeric_values) >= 3:
-                        if len(numeric_values) >= 4:
-                            lives = numeric_values[0]
-                            claims_cnt = numeric_values[1]
-                            amt_before_vat = numeric_values[2]
-                            amt_after_vat = numeric_values[3]
-                        else:
-                            lives = 0
-                            claims_cnt = numeric_values[0]
-                            amt_before_vat = numeric_values[1]
-                            amt_after_vat = numeric_values[2]
-                            
-                        if claims_cnt > 0 or amt_before_vat > 0:
-                            cleaned_records.append({
-                                'session_id': str(session_id),
-                                'created_at': pd.Timestamp.now(tz='UTC'),
-                                'month_code': std_month_code,
-                                'month_weight': 1,
-                                'class_tier': current_tier,
-                                'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
-                                'claims_count': int(claims_cnt),
-                                'paid_claims_sar': amt_before_vat,      # القيمة المعتمدة قبل الضريبة
-                                'paid_claims_vat_sar': amt_after_vat    # القيمة بعد الضريبة
-                            })
+                    # معالجة انزياح الأعمدة عند وجود الرقم التسلسلي مثل (12/2024 1 229 442 ...)
+                    if len(numeric_values) >= 5:
+                        lives = numeric_values[1]
+                        claims_cnt = numeric_values[2]
+                        amt_before_vat = numeric_values[3]
+                        amt_after_vat = numeric_values[4]
+                    elif len(numeric_values) == 4:
+                        lives = numeric_values[0]
+                        claims_cnt = numeric_values[1]
+                        amt_before_vat = numeric_values[2]
+                        amt_after_vat = numeric_values[3]
+                    elif len(numeric_values) == 3:
+                        lives = 0
+                        claims_cnt = numeric_values[0]
+                        amt_before_vat = numeric_values[1]
+                        amt_after_vat = numeric_values[2]
+                    else:
+                        continue
+                        
+                    if claims_cnt > 0 or amt_before_vat > 0:
+                        cleaned_records.append({
+                            'session_id': str(session_id),
+                            'created_at': pd.Timestamp.now(tz='UTC'),
+                            'month_code': std_month_code,
+                            'month_weight': 1,
+                            'class_tier': current_tier,
+                            'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
+                            'claims_count': int(claims_cnt),
+                            'paid_claims_sar': amt_before_vat,      # القيمة المعتمدة قبل الضريبة
+                            'paid_claims_vat_sar': amt_after_vat    # القيمة بعد الضريبة
+                        })
 
     return cleaned_records
 
@@ -170,7 +177,7 @@ def parse_excel_or_csv(file_obj, session_id, default_members):
 
     return cleaned_records
 
-# 5. منطق فصل الدورات التعاقدية وعزل السنوات (CY مقابل PY) استناداً إلى البيانات المستخرجة
+# 5. منطق فصل الدورات التعاقدية وعزل السنوات (CY vs PY) استناداً إلى أرقام الشهور الفعلية
 def process_all_files(uploaded_files, session_id, default_members):
     all_records = []
     for f in uploaded_files:
@@ -185,7 +192,7 @@ def process_all_files(uploaded_files, session_id, default_members):
 
     df = pd.DataFrame(all_records)
     
-    # تجميع الفئات لنفس الشهر وجمع مبالغ المطالبات الصافية
+    # تجميع الفئات لنفس الشهر وجمع المبالغ المالية
     df = df.groupby(['session_id', 'month_code', 'class_tier'], as_index=False).agg({
         'created_at': 'first',
         'month_weight': 'first',
@@ -195,20 +202,19 @@ def process_all_files(uploaded_files, session_id, default_members):
         'paid_claims_vat_sar': 'sum'
     })
 
-    # تحويل كود الشهر لتاريخ فرز
+    # تحويل كود الشهر لتاريخ للفرز الدقيق
     df['period_date'] = pd.to_datetime(df['month_code'], format='%Y-%m')
     df = df.sort_values('period_date').reset_index(drop=True)
     
-    # تحديد دورة السنة التعاقدية تلقائياً: الشهور (12 حتى 11 من السنة التالية) تنتمي لسنة البداية
-    # هذا يضمن أن شهر 12/2024 يجمع مع شهور 2025 ضمن دورة 2024
+    # تحديد دورة السنة التعاقدية ذاتياً: الشهور (12 حتى 11 من السنة التالية) تنتمي لسنة البداية
     df['cycle_base_year'] = df['period_date'].apply(
         lambda d: d.year if d.month == 12 else d.year - 1
     )
     
-    # إسناد ملصق السنة التعاقدية الموحد (مثلاً: 2024 / 2025)
+    # إسناد ملصق السنة التعاقدية الموحد (2024 / 2025)
     df['policy_year_label'] = df['cycle_base_year'].astype(str) + " / " + (df['cycle_base_year'] + 1).astype(str)
     
-    # تصنيف الدورات ديناميكياً: أحدث دورة زمنياً تأخذ CY، والسابقة تأخذ PY، وما قبلها P2Y
+    # تصنيف الدورات ديناميكياً: أحدث دورة CY، والسابقة PY، والأقدم P2Y
     max_year = df['cycle_base_year'].max()
     df['policy_year'] = df['cycle_base_year'].apply(
         lambda y: 'CY' if y == max_year else ('PY' if y == max_year - 1 else 'P2Y')
@@ -335,7 +341,6 @@ if uploaded_files:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
 
-                    # استخراج الشهور وتحديد دورات السنوات ذاتياً دون الاعتماد على مدخل يدوي
                     df_mapped = process_all_files(uploaded_files, session_id, total_members)
                     
                     if df_mapped.empty:
