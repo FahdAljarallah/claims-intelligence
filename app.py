@@ -35,7 +35,7 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-# الأعمدة الصارمة المطابقة لجدول BigQuery
+# الأعمدة الصارمة المطابقة لمخطط جدول BigQuery
 EXACT_BQ_COLUMNS = [
     'session_id', 'created_at', 'policy_year', 'policy_year_label', 'month_code', 
     'month_weight', 'class_tier', 'active_lives', 'claims_count', 
@@ -77,10 +77,10 @@ def parse_pdf_claims(file_obj, session_id, default_members):
 
             for line in lines:
                 line_clean = line.strip()
-                if any(kw in line_clean.lower() for kw in ['report date', 'total', 'subtotal', 'inception', 'expiry', 'period', 'limit']):
+                if any(kw in line_clean.lower() for kw in ['report date', 'total', 'subtotal', 'period', 'limit']):
                     continue
                 
-                # رصد نمط الشهر والسنة (MM/YYYY)
+                # رصد نمط الشهر والسنة (MM/YYYY) في السطر
                 date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line_clean)
                 if date_match:
                     month_num = date_match.group(1).zfill(2)
@@ -112,8 +112,8 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                                 'class_tier': current_tier,
                                 'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
                                 'claims_count': int(claims_cnt),
-                                'paid_claims_sar': amt_before_vat,
-                                'paid_claims_vat_sar': amt_after_vat
+                                'paid_claims_sar': amt_before_vat,      # القيمة المعتمدة قبل الضريبة
+                                'paid_claims_vat_sar': amt_after_vat    # القيمة بعد الضريبة
                             })
 
     return cleaned_records
@@ -170,8 +170,8 @@ def parse_excel_or_csv(file_obj, session_id, default_members):
 
     return cleaned_records
 
-# 5. منطق فصل الدورات التعاقدية وعزل السنوات (CY vs PY) بدقة
-def process_all_files(uploaded_files, session_id, default_members):
+# 5. منطق فصل الدورات التعاقدية وعزل السنوات (CY vs PY) استناداً إلى شهر السريان
+def process_all_files(uploaded_files, session_id, default_members, inception_date):
     all_records = []
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
@@ -185,7 +185,7 @@ def process_all_files(uploaded_files, session_id, default_members):
 
     df = pd.DataFrame(all_records)
     
-    # تجميع الفئات لنفس الشهر وجمع مبالغ المطالبات الصافية
+    # دمج الفئات لنفس الشهر وجمع مبالغ المطالبات الصافية
     df = df.groupby(['session_id', 'month_code', 'class_tier'], as_index=False).agg({
         'created_at': 'first',
         'month_weight': 'first',
@@ -195,26 +195,28 @@ def process_all_files(uploaded_files, session_id, default_members):
         'paid_claims_vat_sar': 'sum'
     })
 
-    # تحويل الشهر لتاريخ لفرز التسلسل الزمني
+    # تحويل كود الشهر لتاريخ فرز
     df['period_date'] = pd.to_datetime(df['month_code'], format='%Y-%m')
     df = df.sort_values('period_date').reset_index(drop=True)
     
-    # تقسيم الشهور إلى دورات تعاقدية مستقلة (كل 12 شهراً أو عند ارتداد رقم الشهر)
-    df['month_num'] = df['period_date'].dt.month
-    df['is_new_cycle'] = (df['month_num'] <= df['month_num'].shift(1)).fillna(False)
-    df['cycle_id'] = df['is_new_cycle'].cumsum()
+    # استخراج شهر بداية السريان (افتراضياً شهر 12 إذا لم يحدد)
+    start_month = inception_date.month if inception_date else 12
     
-    # تحديد سنة البداية لكل دورة لاشتقاق التسمية (مثل 2024 / 2025)
-    cycle_min_year = df.groupby('cycle_id')['period_date'].transform('min').dt.year
-    df['policy_year_label'] = cycle_min_year.astype(str) + " / " + (cycle_min_year + 1).astype(str)
-    
-    # إسناد CY للدورة الأحدث زمنياً، و PY للدورة السابقة، و P2Y للأقدم
-    latest_cycle = df['cycle_id'].max()
-    df['policy_year'] = df['cycle_id'].apply(
-        lambda c: 'CY' if c == latest_cycle else ('PY' if c == latest_cycle - 1 else 'P2Y')
+    # إسناد كل شهر إلى سنة البداية التعاقدية بدقة (مثلاً لو البداية شهر 12، فشهر 12/2024 يتبع دورة 2024)
+    df['cycle_year'] = df['period_date'].apply(
+        lambda d: d.year if d.month >= start_month else d.year - 1
     )
     
-    df = df.drop(columns=['period_date', 'month_num', 'is_new_cycle', 'cycle_id'])
+    # توليد ملصق السنة التعاقدية تلقائياً: 2024 / 2025
+    df['policy_year_label'] = df['cycle_year'].astype(str) + " / " + (df['cycle_year'] + 1).astype(str)
+    
+    # إسناد CY لأحدث دورة، و PY للتي تسبقها
+    latest_cycle = df['cycle_year'].max()
+    df['policy_year'] = df['cycle_year'].apply(
+        lambda y: 'CY' if y == latest_cycle else ('PY' if y == latest_cycle - 1 else 'P2Y')
+    )
+    
+    df = df.drop(columns=['period_date', 'cycle_year'])
     return df[EXACT_BQ_COLUMNS]
 
 # 6. الرفع إلى BigQuery وحوكمة الجلسة
@@ -335,7 +337,7 @@ if uploaded_files:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
 
-                    df_mapped = process_all_files(uploaded_files, session_id, total_members)
+                    df_mapped = process_all_files(uploaded_files, session_id, total_members, inception_date)
                     
                     if df_mapped.empty:
                         raise ValueError("لم يتم العثور على أسطر مطالبات صالحة داخل الملفات المرفوعة.")
