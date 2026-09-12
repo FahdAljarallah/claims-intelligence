@@ -9,9 +9,9 @@ import pdfplumber
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
-# 1. إعداد الصفحة والبيئة التنفيذية
+# 1. إعداد الصفحة التنفيذية
 st.set_page_config(
-    page_title="مرصد ذكاء المطالبات والتجديد التأميني",
+    page_title="Claims Intelligence Portal",
     page_icon="📊",
     layout="wide"
 )
@@ -20,7 +20,7 @@ PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
 LOOKER_REPORT_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47/page/1f97F"
 
-# 2. إدارة الاتصال بمستودع بيانات BigQuery
+# 2. إدارة الاتصال بـ BigQuery
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -35,7 +35,6 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-# الأعمدة الصارمة المطابقة لمخطط جدول BigQuery
 EXACT_BQ_COLUMNS = [
     'session_id', 'created_at', 'policy_year', 'policy_year_label', 'month_code', 
     'month_weight', 'class_tier', 'active_lives', 'claims_count', 
@@ -43,7 +42,6 @@ EXACT_BQ_COLUMNS = [
 ]
 
 def safe_clean_number(val):
-    """تنظيف النصوص الرقمية والتعامل مع الفواصل والنقاط المكررة بدقة"""
     if pd.isna(val) or val is None:
         return 0.0
     val_str = str(val).replace('SAR', '').replace('ر.س', '').replace(',', '').strip()
@@ -53,32 +51,35 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# 3. محرك استخراج البيانات من ملفات الـ PDF
+# 3. محرك تفكيك الـ PDF الشامل (يدعم التعاونية وميدغلف وكافة الفئات)
 def parse_pdf_claims(file_obj, session_id, default_members):
     cleaned_records = []
     
     with pdfplumber.open(file_obj) as pdf:
+        current_tier = "VIP"
+        
         for page in pdf.pages:
             page_text = page.extract_text()
             if not page_text:
                 continue
             
-            text_lower = page_text.lower()
-            if "prior policy year" in text_lower or "prior year" in text_lower or "2 years prior" in text_lower:
-                period_tag = "PY"
-                year_label = "Prior Policy Year"
-            else:
-                period_tag = "CY"
-                year_label = "Current Policy Year"
-                
-            for line in page_text.split('\n'):
+            lines = page_text.split('\n')
+            
+            # رصد الفئة التعاقدية في ميدغلف والتعاونية
+            for line in lines:
+                l_low = line.lower()
+                if "class type" in l_low or "class" in l_low:
+                    if "vip1" in l_low:
+                        current_tier = "CLASS VIP1"
+                    elif "vip" in l_low:
+                        current_tier = "CLASS VIP"
+
+            # استخراج أسطر الشهور
+            for line in lines:
                 line_clean = line.strip()
-                
-                # استبعاد الترويسات والهوامش غير التشغيلية
-                if any(kw in line_clean.lower() for kw in ['report date', 'total', 'inception', 'expiry', 'period', 'limit']):
+                if any(kw in line_clean.lower() for kw in ['report date', 'total', 'subtotal', 'inception', 'expiry', 'period', 'limit']):
                     continue
                 
-                # رصد أسطر الشهور (MM/YYYY أو YYYY-MM)
                 date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line_clean)
                 if date_match:
                     month_num = date_match.group(1).zfill(2)
@@ -89,6 +90,7 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                     tokens = [t.strip() for t in line_without_date.split() if t.strip()]
                     numeric_values = [safe_clean_number(t) for t in tokens if safe_clean_number(t) > 0 or t == '0']
                     
+                    # قراءة أرقام المطالبات [Lives, Claims, Paid Before VAT, Paid After VAT]
                     if len(numeric_values) >= 3:
                         if len(numeric_values) >= 4:
                             lives = numeric_values[0]
@@ -101,24 +103,25 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                             amt_before_vat = numeric_values[1]
                             amt_after_vat = numeric_values[2]
                             
+                        # تصفية الشهور الصفرية المستقبلية
                         if claims_cnt > 0 or amt_before_vat > 0:
                             cleaned_records.append({
                                 'session_id': str(session_id),
                                 'created_at': pd.Timestamp.now(tz='UTC'),
-                                'policy_year': period_tag,
-                                'policy_year_label': year_label,
+                                'policy_year': "CY",
+                                'policy_year_label': "Current Policy Year",
                                 'month_code': std_month_code,
                                 'month_weight': 1,
-                                'class_tier': "VIP",
+                                'class_tier': current_tier,
                                 'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
                                 'claims_count': int(claims_cnt),
-                                'paid_claims_sar': amt_before_vat,      # القيمة المعتمدة قبل الضريبة
-                                'paid_claims_vat_sar': amt_after_vat    # القيمة بعد الضريبة
+                                'paid_claims_sar': amt_before_vat,
+                                'paid_claims_vat_sar': amt_after_vat
                             })
 
     return cleaned_records
 
-# 4. محرك استخراج البيانات من ملفات Excel و CSV
+# 4. محرك استيعاب ملفات Excel و CSV
 def parse_excel_or_csv(file_obj, session_id, default_members):
     if file_obj.name.endswith(('xlsx', 'xls')):
         excel_data = pd.read_excel(file_obj, sheet_name=None, header=None)
@@ -132,13 +135,6 @@ def parse_excel_or_csv(file_obj, session_id, default_members):
         raw_df = pd.read_csv(file_obj, header=None)
 
     detected_class = "Class A"
-    for idx, row in raw_df.head(10).iterrows():
-        for c_idx, val in enumerate(row.values):
-            if pd.notnull(val) and 'product/class' in str(val).lower():
-                if c_idx + 1 < len(row.values) and pd.notnull(row.values[c_idx + 1]):
-                    detected_class = f"Class {str(row.values[c_idx + 1]).strip()}"
-                    break
-
     header_idx = 10
     for idx, row in raw_df.head(25).iterrows():
         row_str = " ".join([str(val).lower() for val in row.values if pd.notnull(val)])
@@ -148,20 +144,11 @@ def parse_excel_or_csv(file_obj, session_id, default_members):
 
     data_rows = raw_df.iloc[header_idx + 1:].copy()
     cleaned_records = []
-    current_period_tag = "P2Y"
+    current_period_tag = "CY"
 
     for _, row in data_rows.iterrows():
         cell_val = str(row.iloc[0]).strip()
         cell_lower = cell_val.lower()
-
-        if 'policy year' in cell_lower or 'prior' in cell_lower or 'last' in cell_lower:
-            if '2 years prior' in cell_lower:
-                current_period_tag = "P2Y"
-            elif 'prior policy year' in cell_lower or 'prior year' in cell_lower:
-                current_period_tag = "PY"
-            elif 'last policy year' in cell_lower or 'current' in cell_lower:
-                current_period_tag = "CY"
-            continue
 
         if 'total' in cell_lower or cell_lower in ['nan', 'none', '']:
             continue
@@ -176,10 +163,10 @@ def parse_excel_or_csv(file_obj, session_id, default_members):
             cleaned_records.append({
                 'session_id': str(session_id),
                 'created_at': pd.Timestamp.now(tz='UTC'),
-                'policy_year': str(current_period_tag),
+                'policy_year': current_period_tag,
                 'month_code': f"{raw_code[:4]}-{raw_code[4:]}",
                 'month_weight': 1,
-                'class_tier': str(detected_class),
+                'class_tier': detected_class,
                 'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
                 'claims_count': int(claims_cnt),
                 'paid_claims_sar': paid_amt,
@@ -188,7 +175,7 @@ def parse_excel_or_csv(file_obj, session_id, default_members):
 
     return cleaned_records
 
-# 5. معالجة وتوحيد كافة الملفات المرفوعة
+# 5. تجميع ودمج الملفات المتعددة لضمان صحة الإجماليات
 def process_all_files(uploaded_files, session_id, default_members):
     all_records = []
     for f in uploaded_files:
@@ -202,13 +189,13 @@ def process_all_files(uploaded_files, session_id, default_members):
         return pd.DataFrame(columns=EXACT_BQ_COLUMNS)
 
     df_result = pd.DataFrame(all_records)
-    # منع التكرار وإسناد التسمية الزمنية الاكتوارية
-    df_result = df_result.drop_duplicates(subset=['policy_year', 'month_code'], keep='last')
+    
+    # اشتقاق ملصق سنة الوثيقة ديناميكياً
     min_months = df_result.groupby('policy_year')['month_code'].transform('min')
     df_result['policy_year_label'] = min_months.apply(lambda m: f"{str(m)[:4]} / {int(str(m)[:4]) + 1}")
     return df_result[EXACT_BQ_COLUMNS]
 
-# 6. إدارة مستودع البيانات وحوكمة الجلسات
+# 6. إدارة مستودع البيانات وحوكمة الجلسة
 def append_to_bigquery_free_tier(df_mapped):
     if df_mapped.empty:
         return
@@ -236,7 +223,7 @@ def delete_session_data(target_session_id):
         except Exception:
             pass
 
-# 7. قواميس الترجمة والواجهة
+# 7. نصوص الواجهة
 i18n = {
     "AR": {
         "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
@@ -247,7 +234,7 @@ i18n = {
         "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
         "upload_label": "رفع ملفات تجربة المطالبات (PDF أو Excel أو CSV)",
         "btn_process": "قراءة وتحليل البيانات",
-        "processing": "جاري فحص الملفات واستخراج الأداء الصافي قبل الضريبة...",
+        "processing": "جاري سحب البيانات و تهيئتها...",
         "success": "تمت معالجة وضخ البيانات بنجاح للجلسة: ",
         "btn_open_looker": "الانتقال المباشر إلى لوحة المؤشرات في Looker Studio",
         "warn_inputs": "يرجى تعبئة قسط الوثيقة، عدد الأفراد، وتاريخ السريان.",
@@ -264,7 +251,7 @@ i18n = {
         "members_label": "Total Covered Members (Lives)",
         "upload_label": "Upload Claims Experience (PDF, Excel, or CSV)",
         "btn_process": "Process Data",
-        "processing": "Processing files and extracting pure claims before VAT...",
+        "processing": "Processing and preparing data...",
         "success": "Data processed successfully for session: ",
         "btn_open_looker": "Open Dashboard in Looker Studio",
         "warn_inputs": "Please enter current premium, covered members, and inception date.",
@@ -274,7 +261,6 @@ i18n = {
     }
 }
 
-# 8. شاشات الإدخال والتفاعل
 selected_lang = st.selectbox("Language / اللغة", options=["العربية", "English"], index=0)
 lang_code = "AR" if selected_lang == "العربية" else "EN"
 t = i18n[lang_code]
@@ -344,7 +330,7 @@ if uploaded_files:
                     encoded_params = urllib.parse.urlencode({"params": json.dumps(url_params)})
                     target_url = f"{LOOKER_REPORT_URL}?{encoded_params}"
 
-                    st.success(f"{t['success']} `{session_id}` (تمت معالجة {len(df_mapped)} شهراً بالصافي قبل الضريبة)")
+                    st.success(f"{t['success']} `{session_id}`")
                     st.link_button(label=t["btn_open_looker"], url=target_url, type="primary")
 
                 except Exception as e:
