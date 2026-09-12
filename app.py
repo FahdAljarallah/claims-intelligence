@@ -53,7 +53,7 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# 3. محرك استخراج البيانات من ملفات الـ PDF
+# 3. محرك استخراج البيانات من ملفات الـ PDF (التعاونية وميدغلف)
 def parse_pdf_claims(file_obj, session_id, default_members):
     cleaned_records = []
     
@@ -170,8 +170,8 @@ def parse_excel_or_csv(file_obj, session_id, default_members):
 
     return cleaned_records
 
-# 5. منطق فصل الدورات التعاقدية وعزل السنوات (CY vs PY) استناداً إلى شهر السريان
-def process_all_files(uploaded_files, session_id, default_members, inception_date):
+# 5. منطق فصل الدورات التعاقدية وعزل السنوات (CY مقابل PY) استناداً إلى البيانات المستخرجة
+def process_all_files(uploaded_files, session_id, default_members):
     all_records = []
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
@@ -185,7 +185,7 @@ def process_all_files(uploaded_files, session_id, default_members, inception_dat
 
     df = pd.DataFrame(all_records)
     
-    # دمج الفئات لنفس الشهر وجمع مبالغ المطالبات الصافية
+    # تجميع الفئات لنفس الشهر وجمع مبالغ المطالبات الصافية
     df = df.groupby(['session_id', 'month_code', 'class_tier'], as_index=False).agg({
         'created_at': 'first',
         'month_weight': 'first',
@@ -199,24 +199,22 @@ def process_all_files(uploaded_files, session_id, default_members, inception_dat
     df['period_date'] = pd.to_datetime(df['month_code'], format='%Y-%m')
     df = df.sort_values('period_date').reset_index(drop=True)
     
-    # استخراج شهر بداية السريان (افتراضياً شهر 12 إذا لم يحدد)
-    start_month = inception_date.month if inception_date else 12
-    
-    # إسناد كل شهر إلى سنة البداية التعاقدية بدقة (مثلاً لو البداية شهر 12، فشهر 12/2024 يتبع دورة 2024)
-    df['cycle_year'] = df['period_date'].apply(
-        lambda d: d.year if d.month >= start_month else d.year - 1
+    # تحديد دورة السنة التعاقدية تلقائياً: الشهور (12 حتى 11 من السنة التالية) تنتمي لسنة البداية
+    # هذا يضمن أن شهر 12/2024 يجمع مع شهور 2025 ضمن دورة 2024
+    df['cycle_base_year'] = df['period_date'].apply(
+        lambda d: d.year if d.month == 12 else d.year - 1
     )
     
-    # توليد ملصق السنة التعاقدية تلقائياً: 2024 / 2025
-    df['policy_year_label'] = df['cycle_year'].astype(str) + " / " + (df['cycle_year'] + 1).astype(str)
+    # إسناد ملصق السنة التعاقدية الموحد (مثلاً: 2024 / 2025)
+    df['policy_year_label'] = df['cycle_base_year'].astype(str) + " / " + (df['cycle_base_year'] + 1).astype(str)
     
-    # إسناد CY لأحدث دورة، و PY للتي تسبقها
-    latest_cycle = df['cycle_year'].max()
-    df['policy_year'] = df['cycle_year'].apply(
-        lambda y: 'CY' if y == latest_cycle else ('PY' if y == latest_cycle - 1 else 'P2Y')
+    # تصنيف الدورات ديناميكياً: أحدث دورة زمنياً تأخذ CY، والسابقة تأخذ PY، وما قبلها P2Y
+    max_year = df['cycle_base_year'].max()
+    df['policy_year'] = df['cycle_base_year'].apply(
+        lambda y: 'CY' if y == max_year else ('PY' if y == max_year - 1 else 'P2Y')
     )
     
-    df = df.drop(columns=['period_date', 'cycle_year'])
+    df = df.drop(columns=['period_date', 'cycle_base_year'])
     return df[EXACT_BQ_COLUMNS]
 
 # 6. الرفع إلى BigQuery وحوكمة الجلسة
@@ -337,7 +335,8 @@ if uploaded_files:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
 
-                    df_mapped = process_all_files(uploaded_files, session_id, total_members, inception_date)
+                    # استخراج الشهور وتحديد دورات السنوات ذاتياً دون الاعتماد على مدخل يدوي
+                    df_mapped = process_all_files(uploaded_files, session_id, total_members)
                     
                     if df_mapped.empty:
                         raise ValueError("لم يتم العثور على أسطر مطالبات صالحة داخل الملفات المرفوعة.")
