@@ -67,7 +67,6 @@ def parse_pdf_claims(file_obj, session_id, default_members):
             
             lines = page_text.split('\n')
             
-            # رصد الفئة التعاقدية
             for line in lines:
                 l_low = line.lower()
                 if "class type" in l_low or "class" in l_low:
@@ -92,38 +91,52 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                     tokens = [t.strip() for t in line_without_date.split() if t.strip()]
                     numeric_values = [safe_clean_number(t) for t in tokens if safe_clean_number(t) > 0 or t == '0']
                     
-                    if len(numeric_values) >= 3:
-                        # حسم الضريبة: المبلغ قبل الضريبة هو دائماً الأصغر بين آخر رقمين ماليين
-                        val_a = numeric_values[-2]
-                        val_b = numeric_values[-1]
+                    # استخراج الأعمدة حسب هيكلة الجدول ومنع سحب مبالغ الـ Outstanding الصفرية
+                    # النمط مع رقم تسلسلي في البداية: [1, Lives, Claims, Paid_Ex, Paid_Inc, OS_Cnt, OS_Ex, OS_Inc]
+                    if len(numeric_values) >= 8:
+                        lives = numeric_values[1]
+                        claims_cnt = numeric_values[2]
+                        amt_before_vat = numeric_values[3]
+                        amt_after_vat = numeric_values[4]
+                    # النمط القياسي مع مبالغ معلقة: [Lives, Claims, Paid_Ex, Paid_Inc, OS_Cnt, OS_Ex, OS_Inc]
+                    elif len(numeric_values) == 7:
+                        lives = numeric_values[0]
+                        claims_cnt = numeric_values[1]
+                        amt_before_vat = numeric_values[2]
+                        amt_after_vat = numeric_values[3]
+                    # النمط مع رقم تسلسلي وبدون مبالغ معلقة: [1, Lives, Claims, Paid_Ex, Paid_Inc]
+                    elif len(numeric_values) == 5:
+                        lives = numeric_values[1]
+                        claims_cnt = numeric_values[2]
+                        amt_before_vat = numeric_values[3]
+                        amt_after_vat = numeric_values[4]
+                    # النمط القياسي المختصر: [Lives, Claims, Paid_Ex, Paid_Inc]
+                    elif len(numeric_values) == 4:
+                        lives = numeric_values[0]
+                        claims_cnt = numeric_values[1]
+                        amt_before_vat = numeric_values[2]
+                        amt_after_vat = numeric_values[3]
+                    # النمط بدون عدد أفراد: [Claims, Paid_Ex, Paid_Inc]
+                    elif len(numeric_values) == 3:
+                        lives = 0
+                        claims_cnt = numeric_values[0]
+                        amt_before_vat = numeric_values[1]
+                        amt_after_vat = numeric_values[2]
+                    else:
+                        continue
                         
-                        amt_before_vat = min(val_a, val_b)
-                        amt_after_vat = max(val_a, val_b)
-                        
-                        # استخراج أعداد الأفراد والمطالبات من بداية السطر مع معالجة الأرقام التسلسلية
-                        remaining_counts = numeric_values[:-2]
-                        if len(remaining_counts) >= 2:
-                            claims_cnt = remaining_counts[-1]
-                            lives = remaining_counts[-2]
-                        elif len(remaining_counts) == 1:
-                            claims_cnt = remaining_counts[0]
-                            lives = 0
-                        else:
-                            claims_cnt = 0
-                            lives = 0
-                            
-                        if claims_cnt > 0 or amt_before_vat > 0:
-                            cleaned_records.append({
-                                'session_id': str(session_id),
-                                'created_at': pd.Timestamp.now(tz='UTC'),
-                                'month_code': std_month_code,
-                                'month_weight': 1,
-                                'class_tier': current_tier,
-                                'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
-                                'claims_count': int(claims_cnt),
-                                'paid_claims_sar': amt_before_vat,      # الصافي قبل الضريبة الحصري
-                                'paid_claims_vat_sar': amt_after_vat    # المبلغ بعد الضريبة
-                            })
+                    if claims_cnt > 0 or amt_before_vat > 0:
+                        cleaned_records.append({
+                            'session_id': str(session_id),
+                            'created_at': pd.Timestamp.now(tz='UTC'),
+                            'month_code': std_month_code,
+                            'month_weight': 1,
+                            'class_tier': current_tier,
+                            'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
+                            'claims_count': int(claims_cnt),
+                            'paid_claims_sar': amt_before_vat,      # المعتمد قبل الضريبة الصافي
+                            'paid_claims_vat_sar': amt_after_vat    # المبلغ بعد الضريبة
+                        })
 
     return cleaned_records
 
@@ -208,7 +221,7 @@ def process_all_files(uploaded_files, session_id, default_members):
     df['period_date'] = pd.to_datetime(df['month_code'], format='%Y-%m')
     df = df.sort_values('period_date').reset_index(drop=True)
     
-    # تحديد دورة السنة التعاقدية ذاتياً: الشهور (12 حتى 11 من السنة التالية) تنتمي لسنة البداية
+    # تحديد دورة السنة التعاقدية: الشهور (12 حتى 11 من السنة التالية) تنتمي لسنة البداية
     df['cycle_base_year'] = df['period_date'].apply(
         lambda d: d.year if d.month == 12 else d.year - 1
     )
