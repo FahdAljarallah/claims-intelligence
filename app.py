@@ -62,6 +62,40 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
+# استخراج تاريخ سريان الوثيقة (Inception Date) آلياً من ملف الـ PDF
+def extract_inception_year_from_pdf(file_obj):
+    file_obj.seek(0)
+    with pdfplumber.open(file_obj) as pdf:
+        for page in pdf.pages[:2]: # البحث في أول صفحتين
+            text = page.extract_text()
+            if not text:
+                continue
+            # البحث عن صيغ مثل Inception Date أو Inception مع تاريخ
+            match = re.search(r'(?:inception\s*date|inception)[:\s]*([0-3]?[0-9][/\-][0-1]?[0-9][/\-](?:20\d{2}|19\d{2}))', text, re.IGNORECASE)
+            if match:
+                date_str = match.group(1)
+                yr_match = re.search(r'(20\d{2})', date_str)
+                if yr_match:
+                    return int(yr_match.group(1))
+            
+            # بحث بديل عن أي سنة تظهر بجانب كلمة inception
+            for line in text.split('\n'):
+                if 'inception' in line.lower():
+                    yr_match = re.search(r'(20\d{2})', line)
+                    if yr_match:
+                        return int(yr_match.group(1))
+                        
+        # إذا لم يجد كلمة inception صراحة، يأخذ أحدث سنة موجودة في الترويسة
+        for page in pdf.pages[:1]:
+            text = page.extract_text()
+            if text:
+                years = re.findall(r'\b(20\d{2})\b', text)
+                if years:
+                    int_y = [int(y) for y in years if 2020 <= int(y) <= 2030]
+                    if int_y:
+                        return max(int_y)
+    return 2025
+
 # 3. استخراج البيانات الشهرية
 def parse_pdf_claims(file_obj, session_id, default_members):
     file_obj.seek(0)
@@ -247,36 +281,33 @@ def parse_pdf_providers(file_obj, session_id):
                             })
     return provider_records
 
-# 6. المعايرة الزمنية الصارمة بناءً على تاريخ السريان (Inception Date)
-def process_all_files(uploaded_files, session_id, default_members, user_inception_date):
+# 6. المعايرة الزمنية الآلية استناداً إلى Inception Date المستخرج من كل ملف
+def process_all_files(uploaded_files, session_id, default_members):
     file_processed_data = []
 
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
+            # استخراج سنة السريان آلياً من محتوى ملف الـ PDF نفسه
+            inception_yr = extract_inception_year_from_pdf(f)
+            
             m_rec = parse_pdf_claims(f, session_id, default_members)
             b_rec = parse_pdf_benefits(f, session_id)
             p_rec = parse_pdf_providers(f, session_id)
             
-            if m_rec:
-                df_m_temp = pd.DataFrame(m_rec)
-                df_m_temp['period_date'] = pd.to_datetime(df_m_temp['month_code'], format='%Y-%m', errors='coerce')
-                valid_dates = df_m_temp['period_date'].dropna()
-                
-                # تحديد سنة الأساس لكل ملف بناءً على أحدث شهر موجود فيه
-                base_yr = valid_dates.dt.year.max() if not valid_dates.empty else user_inception_date.year
-                file_processed_data.append({
-                    'base_year': base_yr,
-                    'monthly': m_rec,
-                    'benefits': b_rec,
-                    'providers': p_rec
-                })
+            file_processed_data.append({
+                'base_year': inception_yr,
+                'monthly': m_rec,
+                'benefits': b_rec,
+                'providers': p_rec
+            })
 
     if not file_processed_data:
         return pd.DataFrame(columns=EXACT_BQ_COLUMNS_MONTHLY), pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS), pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
 
-    # ترتيب الملفات تنازلياً لتحديد CY بناءً على تاريخ السريان المدخل
-    anchor_year = user_inception_date.year
-    
+    # تحديد سنة CY الكبرى بناءً على أحدث Inception Year بين الملفات المرفوعة
+    all_base_years = [item['base_year'] for item in file_processed_data]
+    max_global_year = max(all_base_years)
+
     all_monthly = []
     all_benefits = []
     all_providers = []
@@ -284,9 +315,9 @@ def process_all_files(uploaded_files, session_id, default_members, user_inceptio
     for item in file_processed_data:
         b_yr = item['base_year']
         
-        # المعايرة المطلوبة: الإسناد التنازلي بناءً على مقارنة سنة الملف بسنة السريان الحالية
-        year_diff = anchor_year - b_yr
-        if year_diff == 0 or b_yr >= anchor_year:
+        # المعايرة الزمنية الصارمة: الأحدث CY، ما قبلها بشنة PY، ما قبلها بمرتبة PY-1
+        year_diff = max_global_year - b_yr
+        if year_diff == 0:
             p_year_code = 'CY'
         elif year_diff == 1:
             p_year_code = 'PY'
@@ -417,7 +448,8 @@ if uploaded_files:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
 
-                    df_monthly, df_benefits, df_providers = process_all_files(uploaded_files, session_id, total_members, inception_date)
+                    # استدعاء الدالة مع الاعتماد على قراءة الـ Inception من الملف مباشرة
+                    df_monthly, df_benefits, df_providers = process_all_files(uploaded_files, session_id, total_members)
                     
                     if df_monthly.empty:
                         raise ValueError("لم يتم العثور على أسطر مطالبات صالحة.")
