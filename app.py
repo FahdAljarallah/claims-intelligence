@@ -145,7 +145,7 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                     pending_month_code = None
     return cleaned_records
 
-# 4. استخراج جدول المنافع مع رصد تفصيلي للسنوات
+# 4. استخراج جدول المنافع
 def parse_pdf_benefits(file_obj, session_id):
     file_obj.seek(0)
     benefit_records = []
@@ -154,18 +154,10 @@ def parse_pdf_benefits(file_obj, session_id):
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
         is_benefit_section = False
-        detected_file_year = None
-        
         for page in pdf.pages:
             page_text = page.extract_text()
             if not page_text:
                 continue
-            
-            # اكتشاف سنة التقرير من ترويسة الصفحة
-            yr_match = re.search(r'\b(20\d{2})\b', page_text)
-            if yr_match and not detected_file_year:
-                detected_file_year = int(yr_match.group(1))
-
             lines = page_text.split('\n')
             for line in lines:
                 l_low = line.lower()
@@ -202,8 +194,7 @@ def parse_pdf_benefits(file_obj, session_id):
                             'benefit_name': benefit_name,
                             'claims_count': int(numeric_tokens[0]),
                             'paid_claims_sar': numeric_tokens[1],
-                            'paid_claims_vat_sar': numeric_tokens[2],
-                            'detected_year': detected_file_year
+                            'paid_claims_vat_sar': numeric_tokens[2]
                         })
     return benefit_records
 
@@ -214,17 +205,10 @@ def parse_pdf_providers(file_obj, session_id):
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
         is_provider_section = False
-        detected_file_year = None
-        
         for page in pdf.pages:
             page_text = page.extract_text()
             if not page_text:
                 continue
-            
-            yr_match = re.search(r'\b(20\d{2})\b', page_text)
-            if yr_match and not detected_file_year:
-                detected_file_year = int(yr_match.group(1))
-
             lines = page_text.split('\n')
             for line in lines:
                 l_low = line.lower()
@@ -259,13 +243,12 @@ def parse_pdf_providers(file_obj, session_id):
                                 'provider_name': prov_name,
                                 'claims_count': int(numeric_tokens[0]),
                                 'paid_claims_sar': numeric_tokens[1],
-                                'paid_claims_vat_sar': numeric_tokens[2],
-                                'detected_year': detected_file_year
+                                'paid_claims_vat_sar': numeric_tokens[2]
                             })
     return provider_records
 
-# 6. معالجة وتوزيع السنوات بناءً على النطاق الزمني الفعلي لكل ملف
-def process_all_files(uploaded_files, session_id, default_members):
+# 6. المعايرة الزمنية الصارمة بناءً على تاريخ السريان (Inception Date)
+def process_all_files(uploaded_files, session_id, default_members, user_inception_date):
     file_processed_data = []
 
     for f in uploaded_files:
@@ -276,8 +259,11 @@ def process_all_files(uploaded_files, session_id, default_members):
             
             if m_rec:
                 df_m_temp = pd.DataFrame(m_rec)
-                df_m_temp['period_date'] = pd.to_datetime(df_m_temp['month_code'], format='%Y-%m')
-                base_yr = df_m_temp['period_date'].apply(lambda d: d.year if d.month == 12 else d.year - 1).iloc[0]
+                df_m_temp['period_date'] = pd.to_datetime(df_m_temp['month_code'], format='%Y-%m', errors='coerce')
+                valid_dates = df_m_temp['period_date'].dropna()
+                
+                # تحديد سنة الأساس لكل ملف بناءً على أحدث شهر موجود فيه
+                base_yr = valid_dates.dt.year.max() if not valid_dates.empty else user_inception_date.year
                 file_processed_data.append({
                     'base_year': base_yr,
                     'monthly': m_rec,
@@ -288,17 +274,26 @@ def process_all_files(uploaded_files, session_id, default_members):
     if not file_processed_data:
         return pd.DataFrame(columns=EXACT_BQ_COLUMNS_MONTHLY), pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS), pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
 
-    all_base_years = [item['base_year'] for item in file_processed_data]
-    max_global_year = max(all_base_years)
-
+    # ترتيب الملفات تنازلياً لتحديد CY بناءً على تاريخ السريان المدخل
+    anchor_year = user_inception_date.year
+    
     all_monthly = []
     all_benefits = []
     all_providers = []
 
     for item in file_processed_data:
         b_yr = item['base_year']
+        
+        # المعايرة المطلوبة: الإسناد التنازلي بناءً على مقارنة سنة الملف بسنة السريان الحالية
+        year_diff = anchor_year - b_yr
+        if year_diff == 0 or b_yr >= anchor_year:
+            p_year_code = 'CY'
+        elif year_diff == 1:
+            p_year_code = 'PY'
+        else:
+            p_year_code = 'PY-1'
+            
         p_year_label = f"{b_yr} / {b_yr + 1}"
-        p_year_code = 'CY' if b_yr == max_global_year else ('PY' if b_yr == max_global_year - 1 else 'P2Y')
         
         for m in item['monthly']:
             m['policy_year'] = p_year_code
@@ -308,22 +303,20 @@ def process_all_files(uploaded_files, session_id, default_members):
         for b in item['benefits']:
             b['policy_year'] = p_year_code
             b['policy_year_label'] = p_year_label
-            if 'detected_year' in b:
-                b.pop('detected_year', None)
             all_benefits.append(b)
             
         for p in item['providers']:
             p['policy_year'] = p_year_code
             p['policy_year_label'] = p_year_label
-            if 'detected_year' in p:
-                p.pop('detected_year', None)
             all_providers.append(p)
 
     df_monthly = pd.DataFrame(all_monthly)
-    df_monthly = df_monthly.groupby(['session_id', 'month_code', 'class_tier', 'policy_year', 'policy_year_label'], as_index=False).agg({
-        'created_at': 'first', 'month_weight': 'first', 'active_lives': 'max',
-        'claims_count': 'sum', 'paid_claims_sar': 'sum', 'paid_claims_vat_sar': 'sum'
-    })
+    if not df_monthly.empty:
+        df_monthly = df_monthly.groupby(['session_id', 'month_code', 'class_tier', 'policy_year', 'policy_year_label'], as_index=False).agg({
+            'created_at': 'first', 'month_weight': 'first', 'active_lives': 'max',
+            'claims_count': 'sum', 'paid_claims_sar': 'sum', 'paid_claims_vat_sar': 'sum'
+        })
+        df_monthly = df_monthly[EXACT_BQ_COLUMNS_MONTHLY]
 
     df_benefits = pd.DataFrame(all_benefits) if all_benefits else pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS)
     if not df_benefits.empty:
@@ -339,8 +332,7 @@ def process_all_files(uploaded_files, session_id, default_members):
         })
         df_providers = df_providers[EXACT_BQ_COLUMNS_PROVIDERS]
 
-    df_monthly = df_monthly.drop(columns=['period_date', 'cycle_base_year'], errors='ignore')
-    return df_monthly[EXACT_BQ_COLUMNS_MONTHLY], df_benefits, df_providers
+    return df_monthly, df_benefits, df_providers
 
 # 7. الرفع لـ BigQuery
 def upload_data_to_bigquery(df_monthly, df_benefits, df_providers):
@@ -425,7 +417,7 @@ if uploaded_files:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
 
-                    df_monthly, df_benefits, df_providers = process_all_files(uploaded_files, session_id, total_members)
+                    df_monthly, df_benefits, df_providers = process_all_files(uploaded_files, session_id, total_members, inception_date)
                     
                     if df_monthly.empty:
                         raise ValueError("لم يتم العثور على أسطر مطالبات صالحة.")
