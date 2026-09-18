@@ -62,27 +62,15 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# دالة ذكية لاكتشاف السنة التعاقدية من نصوص الترويسة داخل ملف الـ PDF
-def detect_pdf_policy_year_from_text(full_text):
-    text_lower = full_text.lower()
-    # البحث عن تواريخ البريود أو تواريخ التقرير والسريان
-    years_found = re.findall(r'20\d{2}', full_text)
-    if years_found:
-        # أخذ السنة الأكثر تكراراً أو الأحدث كمرجع
-        return int(years_found[0])
-    return 2025
-
-# 3. استخراج البيانات الشهرية مع رصد دقيق للسنة
+# 3. استخراج البيانات الشهرية
 def parse_pdf_claims(file_obj, session_id, default_members):
     cleaned_records = []
-    file_full_text = ""
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
         for page in pdf.pages:
             page_text = page.extract_text()
             if not page_text:
                 continue
-            file_full_text += "\n" + page_text
             lines = page_text.split('\n')
             for line in lines:
                 l_low = line.lower()
@@ -130,12 +118,14 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                             'paid_claims_sar': amt_before_vat,
                             'paid_claims_vat_sar': amt_after_vat
                         })
-    return cleaned_records, file_full_text
+    return cleaned_records
 
-# 4. استخراج جدول المنافع بدقة
+# 4. استخراج جدول المنافع بمحرك مرن ومتسامح مع فروق الصياغة والإملاء
 def parse_pdf_benefits(file_obj, session_id):
     benefit_records = []
-    valid_benefit_keywords = ['outpatient', 'inpatient', 'dental', 'optical', 'maternity', 'basic coverage', 'op lab', 'op consultation', 'op pharmacy']
+    # توسيع الكلمات المفتاحية لتشمل كافة صيغ وأخطاء شركات التأمين
+    flexible_keywords = ['outpatient', 'inpatient', 'dental', 'optical', 'maternity', 'coverage', 'lab', 'consult', 'pharmacy']
+    
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
         is_benefit_section = False
@@ -154,30 +144,36 @@ def parse_pdf_benefits(file_obj, session_id):
                 
                 if "breakdown by benefit" in l_low or "breakdown by benefits" in l_low or "breakdown" in l_low:
                     is_benefit_section = True
-                    # لا نقوم بـ continue هنا لكي لا نتخطى سطر الترويسة إذا كان يحمل بيانات
                 elif "top 20 utilised" in l_low or "top 20 utilized" in l_low or "monthly claims" in l_low:
                     is_benefit_section = False
                     continue
 
                 if is_benefit_section:
                     line_clean = line.strip()
-                    if not line_clean or not any(kw in l_low for kw in valid_benefit_keywords):
+                    if not line_clean or 'total' in l_low:
                         continue
+                    
+                    # تحقق مرن يعتمد على وجود أي مفتاح طبي في السطر
+                    if not any(kw in l_low for kw in flexible_keywords):
+                        continue
+                        
                     tokens = [t.strip() for t in line_clean.split() if t.strip()]
                     numeric_tokens = [safe_clean_number(t) for t in tokens if safe_clean_number(t) > 0 or t == '0']
+                    
                     if len(numeric_tokens) >= 3:
+                        benefit_name = tokens[0]
                         benefit_records.append({
                             'session_id': str(session_id),
                             'created_at': pd.Timestamp.now(tz='UTC'),
                             'class_tier': current_tier,
-                            'benefit_name': tokens[0],
+                            'benefit_name': benefit_name,
                             'claims_count': int(numeric_tokens[0]),
                             'paid_claims_sar': numeric_tokens[1],
                             'paid_claims_vat_sar': numeric_tokens[2]
                         })
     return benefit_records
 
-# 5. استخراج مقدمي الخدمة
+# 5. استخراج مقدمي الخدمة بمحرك مرن
 def parse_pdf_providers(file_obj, session_id):
     provider_records = []
     with pdfplumber.open(file_obj) as pdf:
@@ -223,13 +219,13 @@ def parse_pdf_providers(file_obj, session_id):
                             })
     return provider_records
 
-# 6. معالجة وتوزيع السنوات بناءً على نطاق الشهور الفعلي لكل ملف
+# 6. معالجة وتوزيع السنوات على مستوى الملف الفردي
 def process_all_files(uploaded_files, session_id, default_members):
     file_processed_data = []
 
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
-            m_rec, full_txt = parse_pdf_claims(f, session_id, default_members)
+            m_rec = parse_pdf_claims(f, session_id, default_members)
             b_rec = parse_pdf_benefits(f, session_id)
             p_rec = parse_pdf_providers(f, session_id)
             
@@ -264,7 +260,6 @@ def process_all_files(uploaded_files, session_id, default_members):
             m['policy_year_label'] = p_year_label
             all_monthly.append(m)
             
-        # إسناد نفس السنة التعاقدية بدقة لجداول المنافع والمقدمين المستخرجة من نفس الملف
         for b in item['benefits']:
             b['policy_year'] = p_year_code
             b['policy_year_label'] = p_year_label
@@ -283,7 +278,6 @@ def process_all_files(uploaded_files, session_id, default_members):
 
     df_benefits = pd.DataFrame(all_benefits) if all_benefits else pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS)
     if not df_benefits.empty:
-        # تجميع المنافع لتجنب التكرار ولضمان شمولية السنوات
         df_benefits = df_benefits.groupby(['session_id', 'class_tier', 'policy_year', 'policy_year_label', 'benefit_name'], as_index=False).agg({
             'created_at': 'first', 'claims_count': 'sum', 'paid_claims_sar': 'sum', 'paid_claims_vat_sar': 'sum'
         })
