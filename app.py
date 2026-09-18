@@ -36,7 +36,6 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-# مخططات الجداول الصارمة
 EXACT_BQ_COLUMNS_MONTHLY = [
     'session_id', 'created_at', 'policy_year', 'policy_year_label', 'month_code', 
     'month_weight', 'class_tier', 'active_lives', 'claims_count', 
@@ -212,7 +211,7 @@ def parse_pdf_providers(file_obj, session_id):
                             })
     return provider_records
 
-# 6. معالجة وتوزيع السنوات على كافة الجداول
+# 6. معالجة وتوزيع السنوات ديناميكياً على كافة الجداول
 def process_all_files(uploaded_files, session_id, default_members):
     all_monthly = []
     all_benefits = []
@@ -246,22 +245,28 @@ def process_all_files(uploaded_files, session_id, default_members):
         lambda y: 'CY' if y == max_year else ('PY' if y == max_year - 1 else 'P2Y')
     )
 
-    # خريطة تربط كود الشهر بملصق السنة لتعميمها على الجداول الفرعية بدقة
-    month_to_py = dict(zip(df_monthly['month_code'], df_monthly['policy_year']))
-    month_to_pyl = dict(zip(df_monthly['month_code'], df_monthly['policy_year_label']))
+    # تحديد سنة الوثيقة الأحدث لكل فئة لتعميمها بدقة على الجداول الفرعية بناءً على نفس فئة الطبقة
+    class_latest_py = {}
+    class_latest_pyl = {}
+    for tier, group in df_monthly.groupby('class_tier'):
+        max_dt = group['period_date'].max()
+        match_row = group[group['period_date'] == max_dt].iloc[0]
+        class_latest_py[tier] = match_row['policy_year']
+        class_latest_pyl[tier] = match_row['policy_year_label']
+
     default_py = 'CY'
     default_pyl = df_monthly['policy_year_label'].iloc[-1] if not df_monthly.empty else "2025 / 2026"
 
     df_benefits = pd.DataFrame(all_benefits) if all_benefits else pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS)
     if not df_benefits.empty:
-        df_benefits['policy_year'] = default_py
-        df_benefits['policy_year_label'] = default_pyl
+        df_benefits['policy_year'] = df_benefits['class_tier'].map(class_latest_py).fillna(default_py)
+        df_benefits['policy_year_label'] = df_benefits['class_tier'].map(class_latest_pyl).fillna(default_pyl)
         df_benefits = df_benefits[EXACT_BQ_COLUMNS_BENEFITS]
 
     df_providers = pd.DataFrame(all_providers) if all_providers else pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
     if not df_providers.empty:
-        df_providers['policy_year'] = default_py
-        df_providers['policy_year_label'] = default_pyl
+        df_providers['policy_year'] = df_providers['class_tier'].map(class_latest_py).fillna(default_py)
+        df_providers['policy_year_label'] = df_providers['class_tier'].map(class_latest_pyl).fillna(default_pyl)
         df_providers = df_providers[EXACT_BQ_COLUMNS_PROVIDERS]
 
     df_monthly = df_monthly.drop(columns=['period_date', 'cycle_base_year'])
