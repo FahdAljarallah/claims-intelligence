@@ -262,7 +262,7 @@ def process_all_files(uploaded_files, session_id, default_members):
     
     df_monthly = df_monthly.drop(columns=['period_date', 'cycle_base_year'])
 
-    # توحيد واستنساخ أطر السنوات للبيانات الفرعية (Benefits & Providers) لتفادي ظهور null
+    # توحيد واستنساخ أطر السنوات للبيانات الفرعية (Benefits & Providers)
     default_py = 'CY'
     default_pyl = df_monthly['policy_year_label'].iloc[-1] if not df_monthly.empty else "2024 / 2025"
 
@@ -284,7 +284,7 @@ def process_all_files(uploaded_files, session_id, default_members):
 
     return df_monthly[EXACT_BQ_COLUMNS_MONTHLY], df_benefits, df_providers
 
-# 6. الرفع إلى BigQuery
+# 6. الرفع إلى BigQuery وتمرير البارامترات للشاشات الثلاث
 def upload_data_to_bigquery(df_monthly, df_benefits, df_providers):
     client = get_bq_client()
     datasets_map = {
@@ -396,8 +396,11 @@ if uploaded_files:
 
                     upload_data_to_bigquery(df_monthly, df_benefits, df_providers)
 
+                    # التمرير المتزامن لرمز الجلسة لجميع مصادر البيانات (ds14, ds15, ds16)
                     url_params = {
                         "ds14.p_session_id": session_id,
+                        "ds15.p_session_id": session_id,
+                        "ds16.p_session_id": session_id,
                         "ds14.param_language": lang_code,
                         "ds14.p_current_premium": int(current_premium),
                         "ds14.p_target_census": int(total_members)
