@@ -19,7 +19,6 @@ st.set_page_config(
 
 PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
-# ملاحظة: تأكد أن الرابط ينتهي بـ /view لضمان تفعيل البارامترات
 LOOKER_REPORT_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47/page/1f97F"
 
 # 2. إدارة الاتصال بمستودع بيانات BigQuery
@@ -37,6 +36,7 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
+# مخططات الجداول الصارمة
 EXACT_BQ_COLUMNS_MONTHLY = [
     'session_id', 'created_at', 'policy_year', 'policy_year_label', 'month_code', 
     'month_weight', 'class_tier', 'active_lives', 'claims_count', 
@@ -46,6 +46,11 @@ EXACT_BQ_COLUMNS_MONTHLY = [
 EXACT_BQ_COLUMNS_BENEFITS = [
     'session_id', 'created_at', 'policy_year', 'policy_year_label', 'class_tier', 
     'benefit_name', 'claims_count', 'paid_claims_sar', 'paid_claims_vat_sar'
+]
+
+EXACT_BQ_COLUMNS_PROVIDERS = [
+    'session_id', 'created_at', 'policy_year', 'policy_year_label', 'class_tier', 
+    'provider_name', 'claims_count', 'paid_claims_sar', 'paid_claims_vat_sar'
 ]
 
 def safe_clean_number(val):
@@ -58,7 +63,7 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# 3. استخراج البيانات الشهرية من الـ PDF
+# 3. استخراج البيانات الشهرية
 def parse_pdf_claims(file_obj, session_id, default_members):
     cleaned_records = []
     with pdfplumber.open(file_obj) as pdf:
@@ -116,11 +121,10 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                         })
     return cleaned_records
 
-# 4. استخراج جدول المنافع بدقة وتجنب مقدمي الخدمة
+# 4. استخراج جدول المنافع
 def parse_pdf_benefits(file_obj, session_id):
     benefit_records = []
     valid_benefit_keywords = ['outpatient', 'inpatient', 'dental', 'optical', 'maternity', 'basic coverage', 'op lab', 'op consultation', 'op pharmacy']
-    
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
         is_benefit_section = False
@@ -146,41 +150,82 @@ def parse_pdf_benefits(file_obj, session_id):
 
                 if is_benefit_section:
                     line_clean = line.strip()
-                    if not line_clean:
+                    if not line_clean or not any(kw in l_low for kw in valid_benefit_keywords):
                         continue
-                    if not any(kw in l_low for kw in valid_benefit_keywords):
-                        continue
-                        
                     tokens = [t.strip() for t in line_clean.split() if t.strip()]
                     numeric_tokens = [safe_clean_number(t) for t in tokens if safe_clean_number(t) > 0 or t == '0']
-                    
                     if len(numeric_tokens) >= 3:
-                        benefit_name = tokens[0]
                         benefit_records.append({
                             'session_id': str(session_id),
                             'created_at': pd.Timestamp.now(tz='UTC'),
                             'class_tier': current_tier,
-                            'benefit_name': benefit_name,
+                            'benefit_name': tokens[0],
                             'claims_count': int(numeric_tokens[0]),
                             'paid_claims_sar': numeric_tokens[1],
                             'paid_claims_vat_sar': numeric_tokens[2]
                         })
     return benefit_records
 
-# 5. معالجة وتوزيع السنوات التعاقدية
+# 5. استخراج أعلى مقدمي الخدمة
+def parse_pdf_providers(file_obj, session_id):
+    provider_records = []
+    with pdfplumber.open(file_obj) as pdf:
+        current_tier = "CLASS VIP"
+        is_provider_section = False
+        for page in pdf.pages:
+            page_text = page.extract_text()
+            if not page_text:
+                continue
+            lines = page_text.split('\n')
+            for line in lines:
+                l_low = line.lower()
+                if "class type" in l_low or "class" in l_low:
+                    if "vip1" in l_low:
+                        current_tier = "CLASS VIP1"
+                    elif "vip" in l_low:
+                        current_tier = "CLASS VIP"
+                
+                if "top 20 utilised" in l_low or "top 20 utilized" in l_low:
+                    is_provider_section = True
+                    continue
+                elif "monthly claims" in l_low or "breakdown by benefit" in l_low:
+                    is_provider_section = False
+                    continue
+
+                if is_provider_section:
+                    line_clean = line.strip()
+                    if not line_clean or any(kw in l_low for kw in ['provider name', 'total', 'page', 'classification']):
+                        continue
+                    tokens = [t.strip() for t in line_clean.split() if t.strip()]
+                    numeric_tokens = [safe_clean_number(t) for t in tokens if safe_clean_number(t) > 0 or t == '0']
+                    if len(numeric_tokens) >= 3:
+                        prov_name = " ".join([t for t in tokens if not re.search(r'\d', t)])
+                        if len(prov_name) > 3:
+                            provider_records.append({
+                                'session_id': str(session_id),
+                                'created_at': pd.Timestamp.now(tz='UTC'),
+                                'class_tier': current_tier,
+                                'provider_name': prov_name,
+                                'claims_count': int(numeric_tokens[0]),
+                                'paid_claims_sar': numeric_tokens[1],
+                                'paid_claims_vat_sar': numeric_tokens[2]
+                            })
+    return provider_records
+
+# 6. معالجة وتوزيع السنوات على كافة الجداول
 def process_all_files(uploaded_files, session_id, default_members):
     all_monthly = []
     all_benefits = []
+    all_providers = []
 
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
-            m_rec = parse_pdf_claims(f, session_id, default_members)
-            b_rec = parse_pdf_benefits(f, session_id)
-            all_monthly.extend(m_rec)
-            all_benefits.extend(b_rec)
+            all_monthly.extend(parse_pdf_claims(f, session_id, default_members))
+            all_benefits.extend(parse_pdf_benefits(f, session_id))
+            all_providers.extend(parse_pdf_providers(f, session_id))
 
     if not all_monthly:
-        return pd.DataFrame(columns=EXACT_BQ_COLUMNS_MONTHLY), pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS)
+        return pd.DataFrame(columns=EXACT_BQ_COLUMNS_MONTHLY), pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS), pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
 
     df_monthly = pd.DataFrame(all_monthly)
     df_monthly = df_monthly.groupby(['session_id', 'month_code', 'class_tier'], as_index=False).agg({
@@ -200,22 +245,35 @@ def process_all_files(uploaded_files, session_id, default_members):
     df_monthly['policy_year'] = df_monthly['cycle_base_year'].apply(
         lambda y: 'CY' if y == max_year else ('PY' if y == max_year - 1 else 'P2Y')
     )
-    
+
+    # خريطة تربط كود الشهر بملصق السنة لتعميمها على الجداول الفرعية بدقة
+    month_to_py = dict(zip(df_monthly['month_code'], df_monthly['policy_year']))
+    month_to_pyl = dict(zip(df_monthly['month_code'], df_monthly['policy_year_label']))
+    default_py = 'CY'
+    default_pyl = df_monthly['policy_year_label'].iloc[-1] if not df_monthly.empty else "2025 / 2026"
+
     df_benefits = pd.DataFrame(all_benefits) if all_benefits else pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS)
     if not df_benefits.empty:
-        df_benefits['policy_year'] = 'CY'
-        df_benefits['policy_year_label'] = df_monthly['policy_year_label'].iloc[-1]
+        df_benefits['policy_year'] = default_py
+        df_benefits['policy_year_label'] = default_pyl
         df_benefits = df_benefits[EXACT_BQ_COLUMNS_BENEFITS]
 
-    df_monthly = df_monthly.drop(columns=['period_date', 'cycle_base_year'])
-    return df_monthly[EXACT_BQ_COLUMNS_MONTHLY], df_benefits
+    df_providers = pd.DataFrame(all_providers) if all_providers else pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
+    if not df_providers.empty:
+        df_providers['policy_year'] = default_py
+        df_providers['policy_year_label'] = default_pyl
+        df_providers = df_providers[EXACT_BQ_COLUMNS_PROVIDERS]
 
-# 6. الرفع لـ BigQuery
-def upload_data_to_bigquery(df_monthly, df_benefits):
+    df_monthly = df_monthly.drop(columns=['period_date', 'cycle_base_year'])
+    return df_monthly[EXACT_BQ_COLUMNS_MONTHLY], df_benefits, df_providers
+
+# 7. الرفع لـ BigQuery
+def upload_data_to_bigquery(df_monthly, df_benefits, df_providers):
     client = get_bq_client()
     datasets_map = {
         "monthly_performance": df_monthly,
-        "benefits_breakdown": df_benefits
+        "benefits_breakdown": df_benefits,
+        "top_providers": df_providers
     }
     for table_name, df_data in datasets_map.items():
         if df_data.empty:
@@ -242,7 +300,7 @@ def delete_session_data(target_session_id):
         except Exception:
             pass
 
-# 7. واجهة المستخدم
+# 8. واجهة المستخدم
 i18n = {
     "AR": {
         "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
@@ -292,14 +350,13 @@ if uploaded_files:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
 
-                    df_monthly, df_benefits = process_all_files(uploaded_files, session_id, total_members)
+                    df_monthly, df_benefits, df_providers = process_all_files(uploaded_files, session_id, total_members)
                     
                     if df_monthly.empty:
                         raise ValueError("لم يتم العثور على أسطر مطالبات صالحة.")
 
-                    upload_data_to_bigquery(df_monthly, df_benefits)
+                    upload_data_to_bigquery(df_monthly, df_benefits, df_providers)
 
-                    # حقن الطابع الزمني (ts) لكسر ذاكرة التخزين المؤقت للمتصفح وضمان تحميل الجلسة الجديدة فوراً
                     url_params = {
                         "ds14.p_session_id": session_id,
                         "ds15.p_session_id": session_id,
@@ -311,7 +368,6 @@ if uploaded_files:
                     }
 
                     encoded_params = urllib.parse.urlencode({"params": json.dumps(url_params)})
-                    # استخدام وضع العرض (/view) بدلاً من التحرير لتفعيل استجابة البارامترات
                     base_view_url = LOOKER_REPORT_URL.replace("/edit", "/view")
                     target_url = f"{base_view_url}?{encoded_params}"
 
