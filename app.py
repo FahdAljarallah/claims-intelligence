@@ -62,15 +62,13 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# استخراج تاريخ سريان الوثيقة (Inception Date) آلياً من ملف الـ PDF
 def extract_inception_year_from_pdf(file_obj):
     file_obj.seek(0)
     with pdfplumber.open(file_obj) as pdf:
-        for page in pdf.pages[:2]: # البحث في أول صفحتين
+        for page in pdf.pages[:2]:
             text = page.extract_text()
             if not text:
                 continue
-            # البحث عن صيغ مثل Inception Date أو Inception مع تاريخ
             match = re.search(r'(?:inception\s*date|inception)[:\s]*([0-3]?[0-9][/\-][0-1]?[0-9][/\-](?:20\d{2}|19\d{2}))', text, re.IGNORECASE)
             if match:
                 date_str = match.group(1)
@@ -78,14 +76,12 @@ def extract_inception_year_from_pdf(file_obj):
                 if yr_match:
                     return int(yr_match.group(1))
             
-            # بحث بديل عن أي سنة تظهر بجانب كلمة inception
             for line in text.split('\n'):
                 if 'inception' in line.lower():
                     yr_match = re.search(r'(20\d{2})', line)
                     if yr_match:
                         return int(yr_match.group(1))
                         
-        # إذا لم يجد كلمة inception صراحة، يأخذ أحدث سنة موجودة في الترويسة
         for page in pdf.pages[:1]:
             text = page.extract_text()
             if text:
@@ -281,15 +277,13 @@ def parse_pdf_providers(file_obj, session_id):
                             })
     return provider_records
 
-# 6. المعايرة الزمنية الآلية استناداً إلى Inception Date المستخرج من كل ملف
+# 6. المعايرة الزمنية الصحيحة: الأحدث هو CY وما قبله PY ثم PY-1
 def process_all_files(uploaded_files, session_id, default_members):
     file_processed_data = []
 
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
-            # استخراج سنة السريان آلياً من محتوى ملف الـ PDF نفسه
             inception_yr = extract_inception_year_from_pdf(f)
-            
             m_rec = parse_pdf_claims(f, session_id, default_members)
             b_rec = parse_pdf_benefits(f, session_id)
             p_rec = parse_pdf_providers(f, session_id)
@@ -304,9 +298,18 @@ def process_all_files(uploaded_files, session_id, default_members):
     if not file_processed_data:
         return pd.DataFrame(columns=EXACT_BQ_COLUMNS_MONTHLY), pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS), pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
 
-    # تحديد سنة CY الكبرى بناءً على أحدث Inception Year بين الملفات المرفوعة
-    all_base_years = [item['base_year'] for item in file_processed_data]
-    max_global_year = max(all_base_years)
+    # جمع كل السنوات الفريدة وترتيبها تنازلياً (الأحدث أولاً)
+    all_base_years = sorted(list(set([item['base_year'] for item in file_processed_data])), reverse=True)
+    
+    # خريطة التوزيع الصارم: الأول CY، الثاني PY، وما تبقى PY-1
+    year_to_code = {}
+    for idx, yr in enumerate(all_base_years):
+        if idx == 0:
+            year_to_code[yr] = 'CY'
+        elif idx == 1:
+            year_to_code[yr] = 'PY'
+        else:
+            year_to_code[yr] = 'PY-1'
 
     all_monthly = []
     all_benefits = []
@@ -314,16 +317,7 @@ def process_all_files(uploaded_files, session_id, default_members):
 
     for item in file_processed_data:
         b_yr = item['base_year']
-        
-        # المعايرة الزمنية الصارمة: الأحدث CY، ما قبلها بشنة PY، ما قبلها بمرتبة PY-1
-        year_diff = max_global_year - b_yr
-        if year_diff == 0:
-            p_year_code = 'CY'
-        elif year_diff == 1:
-            p_year_code = 'PY'
-        else:
-            p_year_code = 'PY-1'
-            
+        p_year_code = year_to_code.get(b_yr, 'PY')
         p_year_label = f"{b_yr} / {b_yr + 1}"
         
         for m in item['monthly']:
@@ -448,7 +442,6 @@ if uploaded_files:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
 
-                    # استدعاء الدالة مع الاعتماد على قراءة الـ Inception من الملف مباشرة
                     df_monthly, df_benefits, df_providers = process_all_files(uploaded_files, session_id, total_members)
                     
                     if df_monthly.empty:
