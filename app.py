@@ -120,10 +120,9 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                         })
     return cleaned_records
 
-# 4. استخراج جدول المنافع بمحرك مرن ومتسامح مع فروق الصياغة والإملاء
+# 4. استخراج جدول المنافع مع إزالة المسافات لضمان التوافق مع كافة صيغ الشركات
 def parse_pdf_benefits(file_obj, session_id):
     benefit_records = []
-    # توسيع الكلمات المفتاحية لتشمل كافة صيغ وأخطاء شركات التأمين
     flexible_keywords = ['outpatient', 'inpatient', 'dental', 'optical', 'maternity', 'coverage', 'lab', 'consult', 'pharmacy']
     
     with pdfplumber.open(file_obj) as pdf:
@@ -136,25 +135,26 @@ def parse_pdf_benefits(file_obj, session_id):
             lines = page_text.split('\n')
             for line in lines:
                 l_low = line.lower()
+                l_nospace = l_low.replace(" ", "")
+                
                 if "class type" in l_low or "class" in l_low:
                     if "vip1" in l_low:
                         current_tier = "CLASS VIP1"
                     elif "vip" in l_low:
                         current_tier = "CLASS VIP"
                 
-                if "breakdown by benefit" in l_low or "breakdown by benefits" in l_low or "breakdown" in l_low:
+                if "breakdown" in l_nospace:
                     is_benefit_section = True
-                elif "top 20 utilised" in l_low or "top 20 utilized" in l_low or "monthly claims" in l_low:
+                elif "top20" in l_nospace or "monthlyclaims" in l_nospace:
                     is_benefit_section = False
                     continue
 
                 if is_benefit_section:
                     line_clean = line.strip()
-                    if not line_clean or 'total' in l_low:
+                    if not line_clean or 'total' in l_nospace:
                         continue
                     
-                    # تحقق مرن يعتمد على وجود أي مفتاح طبي في السطر
-                    if not any(kw in l_low for kw in flexible_keywords):
+                    if not any(kw in l_nospace for kw in flexible_keywords):
                         continue
                         
                     tokens = [t.strip() for t in line_clean.split() if t.strip()]
@@ -173,7 +173,7 @@ def parse_pdf_benefits(file_obj, session_id):
                         })
     return benefit_records
 
-# 5. استخراج مقدمي الخدمة بمحرك مرن
+# 5. استخراج مقدمي الخدمة
 def parse_pdf_providers(file_obj, session_id):
     provider_records = []
     with pdfplumber.open(file_obj) as pdf:
@@ -186,22 +186,24 @@ def parse_pdf_providers(file_obj, session_id):
             lines = page_text.split('\n')
             for line in lines:
                 l_low = line.lower()
+                l_nospace = l_low.replace(" ", "")
+                
                 if "class type" in l_low or "class" in l_low:
                     if "vip1" in l_low:
                         current_tier = "CLASS VIP1"
                     elif "vip" in l_low:
                         current_tier = "CLASS VIP"
                 
-                if "top 20 utilised" in l_low or "top 20 utilized" in l_low:
+                if "top20" in l_nospace:
                     is_provider_section = True
                     continue
-                elif "monthly claims" in l_low or "breakdown by benefit" in l_low:
+                elif "monthlyclaims" in l_nospace or "breakdown" in l_nospace:
                     is_provider_section = False
                     continue
 
                 if is_provider_section:
                     line_clean = line.strip()
-                    if not line_clean or any(kw in l_low for kw in ['provider name', 'total', 'page', 'classification']):
+                    if not line_clean or any(kw in l_nospace for kw in ['providername', 'total', 'page', 'classification']):
                         continue
                     tokens = [t.strip() for t in line_clean.split() if t.strip()]
                     numeric_tokens = [safe_clean_number(t) for t in tokens if safe_clean_number(t) > 0 or t == '0']
@@ -219,7 +221,7 @@ def parse_pdf_providers(file_obj, session_id):
                             })
     return provider_records
 
-# 6. معالجة وتوزيع السنوات على مستوى الملف الفردي
+# 6. معالجة وتوزيع السنوات لكل ملف على حدة
 def process_all_files(uploaded_files, session_id, default_members):
     file_processed_data = []
 
