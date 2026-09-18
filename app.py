@@ -56,7 +56,7 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# استخراج بيانات الأداء الشهري مع التعامل مع الأسطر المنفصلة
+# 1. استخراج الأداء الشهري خام
 def parse_pdf_claims(file_obj, session_id, default_members):
     file_obj.seek(0)
     cleaned_records = []
@@ -106,8 +106,10 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                             cleaned_records.append({
                                 'session_id': str(session_id),
                                 'created_at': pd.Timestamp.now(tz='UTC'),
+                                'policy_year': 'RAW_DATA',
+                                'policy_year_label': file_obj.name,
                                 'month_code': pending_month_code,
-                                'month_weight': 1,
+                                'month_weight': 1.0,
                                 'class_tier': current_tier,
                                 'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
                                 'claims_count': int(claims_cnt),
@@ -128,8 +130,10 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                             cleaned_records.append({
                                 'session_id': str(session_id),
                                 'created_at': pd.Timestamp.now(tz='UTC'),
+                                'policy_year': 'RAW_DATA',
+                                'policy_year_label': file_obj.name,
                                 'month_code': pending_month_code,
-                                'month_weight': 1,
+                                'month_weight': 1.0,
                                 'class_tier': current_tier,
                                 'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
                                 'claims_count': int(claims_cnt),
@@ -139,6 +143,7 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                     pending_month_code = None
     return cleaned_records
 
+# 2. استخراج المنافع خام
 def parse_pdf_benefits(file_obj, session_id):
     file_obj.seek(0)
     benefit_records = []
@@ -177,6 +182,8 @@ def parse_pdf_benefits(file_obj, session_id):
                         benefit_records.append({
                             'session_id': str(session_id),
                             'created_at': pd.Timestamp.now(tz='UTC'),
+                            'policy_year': 'RAW_DATA',
+                            'policy_year_label': file_obj.name,
                             'class_tier': current_tier,
                             'benefit_name': benefit_name,
                             'claims_count': int(numeric_tokens[0]),
@@ -185,6 +192,7 @@ def parse_pdf_benefits(file_obj, session_id):
                         })
     return benefit_records
 
+# 3. استخراج مقدمي الخدمة خام
 def parse_pdf_providers(file_obj, session_id):
     file_obj.seek(0)
     provider_records = []
@@ -222,6 +230,8 @@ def parse_pdf_providers(file_obj, session_id):
                             provider_records.append({
                                 'session_id': str(session_id),
                                 'created_at': pd.Timestamp.now(tz='UTC'),
+                                'policy_year': 'RAW_DATA',
+                                'policy_year_label': file_obj.name,
                                 'class_tier': current_tier,
                                 'provider_name': prov_name,
                                 'claims_count': int(numeric_tokens[0]),
@@ -230,89 +240,18 @@ def parse_pdf_providers(file_obj, session_id):
                             })
     return provider_records
 
-# المعالجة المباشرة وترتيب الملفات تنازلياً حسب ترتيب الرفع أو التوقيت لتوزيع CY, PY, PY-1
-def process_all_files(uploaded_files, session_id, default_members):
-    file_processed_data = []
-
+def process_all_files_raw(uploaded_files, session_id, default_members):
+    all_m, all_b, all_p = [], [], []
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
-            m_rec = parse_pdf_claims(f, session_id, default_members)
-            b_rec = parse_pdf_benefits(f, session_id)
-            p_rec = parse_pdf_providers(f, session_id)
+            all_m.extend(parse_pdf_claims(f, session_id, default_members))
+            all_b.extend(parse_pdf_benefits(f, session_id))
+            all_p.extend(parse_pdf_providers(f, session_id))
             
-            # استخراج سنة بارزة من ملف الـ PDF كمرجع افتراضي
-            f.seek(0)
-            text_sample = f.read(2000).decode('utf-8', errors='ignore')
-            years_found = re.findall(r'\b(20\d{2})\b', text_sample)
-            max_y = max([int(y) for y in years_found if 2020 <= int(y) <= 2030]) if years_found else 2025
-
-            file_processed_data.append({
-                'filename': f.name,
-                'detected_year': max_y,
-                'monthly': m_rec,
-                'benefits': b_rec,
-                'providers': p_rec
-            })
-
-    if not file_processed_data:
-        return pd.DataFrame(columns=EXACT_BQ_COLUMNS_MONTHLY), pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS), pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
-
-    # ترتيب الملفات تنازلياً بحيث يكون الملف الأحدث هو الأول (CY)
-    file_processed_data = sorted(file_processed_data, key=lambda x: x['detected_year'], reverse=True)
-
-    all_monthly = []
-    all_benefits = []
-    all_providers = []
-
-    for idx, item in enumerate(file_processed_data):
-        if idx == 0:
-            p_year_code = 'CY'
-        elif idx == 1:
-            p_year_code = 'PY'
-        else:
-            p_year_code = 'PY-1'
-            
-        b_yr = item['detected_year']
-        p_year_label = f"{b_yr} / {b_yr + 1}"
-        
-        for m in item['monthly']:
-            m['policy_year'] = p_year_code
-            m['policy_year_label'] = p_year_label
-            all_monthly.append(m)
-            
-        for b in item['benefits']:
-            b['policy_year'] = p_year_code
-            b['policy_year_label'] = p_year_label
-            all_benefits.append(b)
-            
-        for p in item['providers']:
-            p['policy_year'] = p_year_code
-            p['policy_year_label'] = p_year_label
-            all_providers.append(p)
-
-    df_monthly = pd.DataFrame(all_monthly)
-    if not df_monthly.empty:
-        df_monthly = df_monthly.groupby(['session_id', 'month_code', 'class_tier', 'policy_year', 'policy_year_label'], as_index=False).agg({
-            'created_at': 'first', 'month_weight': 'first', 'active_lives': 'max',
-            'claims_count': 'sum', 'paid_claims_sar': 'sum', 'paid_claims_vat_sar': 'sum'
-        })
-        df_monthly = df_monthly[EXACT_BQ_COLUMNS_MONTHLY]
-
-    df_benefits = pd.DataFrame(all_benefits) if all_benefits else pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS)
-    if not df_benefits.empty:
-        df_benefits = df_benefits.groupby(['session_id', 'class_tier', 'policy_year', 'policy_year_label', 'benefit_name'], as_index=False).agg({
-            'created_at': 'first', 'claims_count': 'sum', 'paid_claims_sar': 'sum', 'paid_claims_vat_sar': 'sum'
-        })
-        df_benefits = df_benefits[EXACT_BQ_COLUMNS_BENEFITS]
-
-    df_providers = pd.DataFrame(all_providers) if all_providers else pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
-    if not df_providers.empty:
-        df_providers = df_providers.groupby(['session_id', 'class_tier', 'policy_year', 'policy_year_label', 'provider_name'], as_index=False).agg({
-            'created_at': 'first', 'claims_count': 'sum', 'paid_claims_sar': 'sum', 'paid_claims_vat_sar': 'sum'
-        })
-        df_providers = df_providers[EXACT_BQ_COLUMNS_PROVIDERS]
-
-    return df_monthly, df_benefits, df_providers
+    df_m = pd.DataFrame(all_m) if all_m else pd.DataFrame(columns=EXACT_BQ_COLUMNS_MONTHLY)
+    df_b = pd.DataFrame(all_b) if all_b else pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS)
+    df_p = pd.DataFrame(all_p) if all_p else pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
+    return df_m, df_b, df_p
 
 def upload_data_to_bigquery(df_monthly, df_benefits, df_providers):
     client = get_bq_client()
@@ -348,19 +287,17 @@ def delete_session_data(target_session_id):
 
 i18n = {
     "AR": {
-        "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
-        "subtitle": "قم برفع ملف تجربة المطالبات لقراءة الأداء وتحديث لوحة المؤشرات فوراً.",
-        "lang_label": "اللغة / Language",
+        "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence (Raw Data Mode)",
+        "subtitle": "رفع ملفات المطالبات لسحب البيانات الخام وتفقدها في BigQuery.",
         "date_label": "تاريخ بداية سريان الوثيقة",
         "prem_label": "قسط الوثيقة السنوي الحالي (SAR)",
         "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
         "upload_label": "رفع ملفات تجربة المطالبات (PDF)",
-        "btn_process": "قراءة وتحليل البيانات",
-        "processing": "جاري معالجة البيانات وضخها للمستودع...",
-        "success": "تمت معالجة البيانات بنجاح للجلسة: ",
-        "btn_open_looker": "الانتقال المباشر إلى لوحة المؤشرات في Looker Studio",
-        "warn_inputs": "يرجى تعبئة قسط الوثيقة، عدد الأفراد، وتاريخ السريان.",
-        "session_mgmt": "إدارة وحوكمة الجلسة",
+        "btn_process": "سحب البيانات الخام للبيج كويري",
+        "processing": "جاري سحب البيانات الخام...",
+        "success": "تم سحب البيانات بنجاح للجلسة: ",
+        "btn_open_looker": "الانتقال للوحة المؤشرات",
+        "warn_inputs": "يرجى تعبئة الحقول الأساسية.",
         "btn_end_session": "إنهاء الجلسة وحذف البيانات",
         "session_cleared": "تم حذف بيانات الجلسة بنجاح."
     }
@@ -395,29 +332,13 @@ if uploaded_files:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
 
-                    df_monthly, df_benefits, df_providers = process_all_files(uploaded_files, session_id, total_members)
+                    df_monthly, df_benefits, df_providers = process_all_files_raw(uploaded_files, session_id, total_members)
                     
-                    if df_monthly.empty:
-                        raise ValueError("لم يتم العثور على أسطر مطالبات صالحة.")
+                    if df_monthly.empty and df_benefits.empty:
+                        raise ValueError("لم يتم استخراج بيانات صالحة من الملفات.")
 
                     upload_data_to_bigquery(df_monthly, df_benefits, df_providers)
-
-                    url_params = {
-                        "ds14.p_session_id": session_id,
-                        "ds15.p_session_id": session_id,
-                        "ds16.p_session_id": session_id,
-                        "ds14.param_language": lang_code,
-                        "ds14.p_current_premium": int(current_premium),
-                        "ds14.p_target_census": int(total_members),
-                        "ts": int(time.time())
-                    }
-
-                    encoded_params = urllib.parse.urlencode({"params": json.dumps(url_params)})
-                    base_view_url = LOOKER_REPORT_URL.replace("/edit", "/view")
-                    target_url = f"{base_view_url}?{encoded_params}"
-
                     st.success(f"{t['success']} `{session_id}`")
-                    st.link_button(label=t["btn_open_looker"], url=target_url, type="primary")
 
                 except Exception as e:
                     st.error(f"حدث خطأ: {str(e)}")
