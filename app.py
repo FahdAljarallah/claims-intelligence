@@ -62,36 +62,6 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-def extract_inception_year_from_pdf(file_obj):
-    file_obj.seek(0)
-    with pdfplumber.open(file_obj) as pdf:
-        for page in pdf.pages[:2]:
-            text = page.extract_text()
-            if not text:
-                continue
-            match = re.search(r'(?:inception\s*date|inception)[:\s]*([0-3]?[0-9][/\-][0-1]?[0-9][/\-](?:20\d{2}|19\d{2}))', text, re.IGNORECASE)
-            if match:
-                date_str = match.group(1)
-                yr_match = re.search(r'(20\d{2})', date_str)
-                if yr_match:
-                    return int(yr_match.group(1))
-            
-            for line in text.split('\n'):
-                if 'inception' in line.lower():
-                    yr_match = re.search(r'(20\d{2})', line)
-                    if yr_match:
-                        return int(yr_match.group(1))
-                        
-        for page in pdf.pages[:1]:
-            text = page.extract_text()
-            if text:
-                years = re.findall(r'\b(20\d{2})\b', text)
-                if years:
-                    int_y = [int(y) for y in years if 2020 <= int(y) <= 2030]
-                    if int_y:
-                        return max(int_y)
-    return 2025
-
 # 3. استخراج البيانات الشهرية
 def parse_pdf_claims(file_obj, session_id, default_members):
     file_obj.seek(0)
@@ -277,19 +247,28 @@ def parse_pdf_providers(file_obj, session_id):
                             })
     return provider_records
 
-# 6. المعايرة الزمنية الصحيحة: الأحدث هو CY وما قبله PY ثم PY-1
+# 6. المعايرة الزمنية الدقيقة بناءً على أحدث شهر استخلصناه من كل ملف
 def process_all_files(uploaded_files, session_id, default_members):
     file_processed_data = []
 
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
-            inception_yr = extract_inception_year_from_pdf(f)
             m_rec = parse_pdf_claims(f, session_id, default_members)
             b_rec = parse_pdf_benefits(f, session_id)
             p_rec = parse_pdf_providers(f, session_id)
             
+            if m_rec:
+                df_m_temp = pd.DataFrame(m_rec)
+                df_m_temp['period_date'] = pd.to_datetime(df_m_temp['month_code'], format='%Y-%m', errors='coerce')
+                valid_dates = df_m_temp['period_date'].dropna()
+                # نعتمد أحدث سنة شهرية موجودة داخل هذا الملف كمرجع له
+                max_file_year = valid_dates.dt.year.max() if not valid_dates.empty else 2025
+                base_yr = max_file_year if max_file_year == 2026 or max_file_year >= 2025 else max_file_year
+            else:
+                base_yr = 2025
+
             file_processed_data.append({
-                'base_year': inception_yr,
+                'base_year': base_yr,
                 'monthly': m_rec,
                 'benefits': b_rec,
                 'providers': p_rec
@@ -298,10 +277,9 @@ def process_all_files(uploaded_files, session_id, default_members):
     if not file_processed_data:
         return pd.DataFrame(columns=EXACT_BQ_COLUMNS_MONTHLY), pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS), pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
 
-    # جمع كل السنوات الفريدة وترتيبها تنازلياً (الأحدث أولاً)
+    # استخراج كل السنوات الفريدة وترتيبها تنازلياً (الأحدث هو الأول دائماً)
     all_base_years = sorted(list(set([item['base_year'] for item in file_processed_data])), reverse=True)
     
-    # خريطة التوزيع الصارم: الأول CY، الثاني PY، وما تبقى PY-1
     year_to_code = {}
     for idx, yr in enumerate(all_base_years):
         if idx == 0:
