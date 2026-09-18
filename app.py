@@ -97,7 +97,6 @@ def parse_pdf_claims_flexible(file_obj, session_id, default_members):
                     
                     # استخراج الأعمدة بمرونة تامة لضمان عدم انقلاب الأرقام
                     if len(numeric_vals) >= 3:
-                        # التحقق من وجود رقم تسلسلي في البداية
                         if len(numeric_vals) >= 5 and numeric_vals[0] in list(range(1, 32)):
                             lives = numeric_vals[1]
                             claims_cnt = numeric_vals[2]
@@ -320,6 +319,9 @@ if uploaded_files:
         
         st.subheader("🔍 معاينة جدول المنافع (Benefits Breakdown Preview)")
         st.dataframe(st.session_state["preview_b"], use_container_width=True)
+
+        st.subheader("🔍 معاينة جدول مقدمي الخدمة (Top Providers Preview)")
+        st.dataframe(st.session_state["preview_p"], use_container_width=True)
 
         if st.button(t["btn_push"], type="primary"):
             with st.spinner("جاري الضخ إلى المستودع..."):
