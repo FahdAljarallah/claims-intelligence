@@ -62,7 +62,7 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# 3. استخراج البيانات الشهرية المتسامح مع الأسطر المنفصلة
+# 3. محرك استخراج البيانات الشهرية المتسامح مع الأسطر المنفصلة
 def parse_pdf_claims(file_obj, session_id, default_members):
     file_obj.seek(0)
     cleaned_records = []
@@ -247,7 +247,7 @@ def parse_pdf_providers(file_obj, session_id):
                             })
     return provider_records
 
-# 6. معالجة وتوزيع السنوات لكل ملف على حدة (مع استخدام total_members الصحيح)
+# 6. معالجة وتوزيع السنوات لكل ملف على حدة
 def process_all_files(uploaded_files, session_id, default_members):
     file_processed_data = []
 
@@ -404,7 +404,6 @@ if uploaded_files:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
 
-                    # تصحيح اسم المتغير هنا إلى total_members
                     df_monthly, df_benefits, df_providers = process_all_files(uploaded_files, session_id, total_members)
                     
                     if df_monthly.empty:
