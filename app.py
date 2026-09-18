@@ -31,7 +31,7 @@ def get_bq_client():
             clean_body = pk.replace("-----BEGIN PRIVATE KEY-----", "").replace("-----END PRIVATE KEY-----", "").strip()
             if clean_body.startswith("nMI"):
                 clean_body = clean_body[1:]
-            pk = f"-----BEGIN PRIVATE KEY-----\n{clean_body}\n-----END PRIVATE KEY-----\n"
+            pk = f"-----BEGIN PRIVATE KEY-----\n{clean_body}\n-----END PRIVATE KEY-----"
         creds_dict["private_key"] = pk
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
@@ -62,15 +62,27 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# 3. استخراج البيانات الشهرية
+# دالة ذكية لاكتشاف السنة التعاقدية من نصوص الترويسة داخل ملف الـ PDF
+def detect_pdf_policy_year_from_text(full_text):
+    text_lower = full_text.lower()
+    # البحث عن تواريخ البريود أو تواريخ التقرير والسريان
+    years_found = re.findall(r'20\d{2}', full_text)
+    if years_found:
+        # أخذ السنة الأكثر تكراراً أو الأحدث كمرجع
+        return int(years_found[0])
+    return 2025
+
+# 3. استخراج البيانات الشهرية مع رصد دقيق للسنة
 def parse_pdf_claims(file_obj, session_id, default_members):
     cleaned_records = []
+    file_full_text = ""
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
         for page in pdf.pages:
             page_text = page.extract_text()
             if not page_text:
                 continue
+            file_full_text += "\n" + page_text
             lines = page_text.split('\n')
             for line in lines:
                 l_low = line.lower()
@@ -118,9 +130,9 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                             'paid_claims_sar': amt_before_vat,
                             'paid_claims_vat_sar': amt_after_vat
                         })
-    return cleaned_records
+    return cleaned_records, file_full_text
 
-# 4. استخراج جدول المنافع
+# 4. استخراج جدول المنافع بدقة
 def parse_pdf_benefits(file_obj, session_id):
     benefit_records = []
     valid_benefit_keywords = ['outpatient', 'inpatient', 'dental', 'optical', 'maternity', 'basic coverage', 'op lab', 'op consultation', 'op pharmacy']
@@ -140,9 +152,9 @@ def parse_pdf_benefits(file_obj, session_id):
                     elif "vip" in l_low:
                         current_tier = "CLASS VIP"
                 
-                if "breakdown by benefit" in l_low or "breakdown by benefits" in l_low:
+                if "breakdown by benefit" in l_low or "breakdown by benefits" in l_low or "breakdown" in l_low:
                     is_benefit_section = True
-                    continue
+                    # لا نقوم بـ continue هنا لكي لا نتخطى سطر الترويسة إذا كان يحمل بيانات
                 elif "top 20 utilised" in l_low or "top 20 utilized" in l_low or "monthly claims" in l_low:
                     is_benefit_section = False
                     continue
@@ -165,7 +177,7 @@ def parse_pdf_benefits(file_obj, session_id):
                         })
     return benefit_records
 
-# 5. استخراج أعلى مقدمي الخدمة
+# 5. استخراج مقدمي الخدمة
 def parse_pdf_providers(file_obj, session_id):
     provider_records = []
     with pdfplumber.open(file_obj) as pdf:
@@ -211,13 +223,13 @@ def parse_pdf_providers(file_obj, session_id):
                             })
     return provider_records
 
-# 6. معالجة الملفات ومعالجة ربط السنة لكل ملف على حدة (File-Level Policy Year Mapping)
+# 6. معالجة وتوزيع السنوات بناءً على نطاق الشهور الفعلي لكل ملف
 def process_all_files(uploaded_files, session_id, default_members):
     file_processed_data = []
 
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
-            m_rec = parse_pdf_claims(f, session_id, default_members)
+            m_rec, full_txt = parse_pdf_claims(f, session_id, default_members)
             b_rec = parse_pdf_benefits(f, session_id)
             p_rec = parse_pdf_providers(f, session_id)
             
@@ -252,6 +264,7 @@ def process_all_files(uploaded_files, session_id, default_members):
             m['policy_year_label'] = p_year_label
             all_monthly.append(m)
             
+        # إسناد نفس السنة التعاقدية بدقة لجداول المنافع والمقدمين المستخرجة من نفس الملف
         for b in item['benefits']:
             b['policy_year'] = p_year_code
             b['policy_year_label'] = p_year_label
@@ -270,12 +283,20 @@ def process_all_files(uploaded_files, session_id, default_members):
 
     df_benefits = pd.DataFrame(all_benefits) if all_benefits else pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS)
     if not df_benefits.empty:
+        # تجميع المنافع لتجنب التكرار ولضمان شمولية السنوات
+        df_benefits = df_benefits.groupby(['session_id', 'class_tier', 'policy_year', 'policy_year_label', 'benefit_name'], as_index=False).agg({
+            'created_at': 'first', 'claims_count': 'sum', 'paid_claims_sar': 'sum', 'paid_claims_vat_sar': 'sum'
+        })
         df_benefits = df_benefits[EXACT_BQ_COLUMNS_BENEFITS]
 
     df_providers = pd.DataFrame(all_providers) if all_providers else pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
     if not df_providers.empty:
+        df_providers = df_providers.groupby(['session_id', 'class_tier', 'policy_year', 'policy_year_label', 'provider_name'], as_index=False).agg({
+            'created_at': 'first', 'claims_count': 'sum', 'paid_claims_sar': 'sum', 'paid_claims_vat_sar': 'sum'
+        })
         df_providers = df_providers[EXACT_BQ_COLUMNS_PROVIDERS]
 
+    df_monthly = df_monthly.drop(columns=['period_date', 'cycle_base_year'], errors='ignore')
     return df_monthly[EXACT_BQ_COLUMNS_MONTHLY], df_benefits, df_providers
 
 # 7. الرفع لـ BigQuery
