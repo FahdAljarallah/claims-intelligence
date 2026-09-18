@@ -4,6 +4,7 @@ from datetime import datetime
 import uuid
 import json
 import urllib.parse
+import time
 import re
 import pdfplumber
 from google.cloud import bigquery
@@ -18,6 +19,7 @@ st.set_page_config(
 
 PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
+# ملاحظة: تأكد أن الرابط ينتهي بـ /view لضمان تفعيل البارامترات
 LOOKER_REPORT_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47/page/1f97F"
 
 # 2. إدارة الاتصال بمستودع بيانات BigQuery
@@ -114,7 +116,7 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                         })
     return cleaned_records
 
-# 4. محرك صارم لاستخراج جدول المنافع فقط (Breakdown by Benefit) وتجنب مقدمي الخدمة
+# 4. استخراج جدول المنافع بدقة وتجنب مقدمي الخدمة
 def parse_pdf_benefits(file_obj, session_id):
     benefit_records = []
     valid_benefit_keywords = ['outpatient', 'inpatient', 'dental', 'optical', 'maternity', 'basic coverage', 'op lab', 'op consultation', 'op pharmacy']
@@ -135,11 +137,9 @@ def parse_pdf_benefits(file_obj, session_id):
                     elif "vip" in l_low:
                         current_tier = "CLASS VIP"
                 
-                # تفعيل رصد قسم المنافع
                 if "breakdown by benefit" in l_low or "breakdown by benefits" in l_low:
                     is_benefit_section = True
                     continue
-                # الإيقاف الفوري فور دخول قسم مقدمي الخدمة أو التوتال العام
                 elif "top 20 utilised" in l_low or "top 20 utilized" in l_low or "monthly claims" in l_low:
                     is_benefit_section = False
                     continue
@@ -148,8 +148,6 @@ def parse_pdf_benefits(file_obj, session_id):
                     line_clean = line.strip()
                     if not line_clean:
                         continue
-                    
-                    # التحقق الصارم: هل السطر يحتوي فعلاً على اسم منفعة طبية معتمدة؟
                     if not any(kw in l_low for kw in valid_benefit_keywords):
                         continue
                         
@@ -301,17 +299,21 @@ if uploaded_files:
 
                     upload_data_to_bigquery(df_monthly, df_benefits)
 
+                    # حقن الطابع الزمني (ts) لكسر ذاكرة التخزين المؤقت للمتصفح وضمان تحميل الجلسة الجديدة فوراً
                     url_params = {
                         "ds14.p_session_id": session_id,
                         "ds15.p_session_id": session_id,
                         "ds16.p_session_id": session_id,
                         "ds14.param_language": lang_code,
                         "ds14.p_current_premium": int(current_premium),
-                        "ds14.p_target_census": int(total_members)
+                        "ds14.p_target_census": int(total_members),
+                        "ts": int(time.time())
                     }
 
                     encoded_params = urllib.parse.urlencode({"params": json.dumps(url_params)})
-                    target_url = f"{LOOKER_REPORT_URL}?{encoded_params}"
+                    # استخدام وضع العرض (/view) بدلاً من التحرير لتفعيل استجابة البارامترات
+                    base_view_url = LOOKER_REPORT_URL.replace("/edit", "/view")
+                    target_url = f"{base_view_url}?{encoded_params}"
 
                     st.success(f"{t['success']} `{session_id}`")
                     st.link_button(label=t["btn_open_looker"], url=target_url, type="primary")
