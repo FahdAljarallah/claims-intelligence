@@ -211,65 +211,71 @@ def parse_pdf_providers(file_obj, session_id):
                             })
     return provider_records
 
-# 6. معالجة وتوزيع السنوات ديناميكياً على كافة الجداول
+# 6. معالجة الملفات ومعالجة ربط السنة لكل ملف على حدة (File-Level Policy Year Mapping)
 def process_all_files(uploaded_files, session_id, default_members):
+    file_processed_data = []
+
+    for f in uploaded_files:
+        if f.name.lower().endswith('.pdf'):
+            m_rec = parse_pdf_claims(f, session_id, default_members)
+            b_rec = parse_pdf_benefits(f, session_id)
+            p_rec = parse_pdf_providers(f, session_id)
+            
+            if m_rec:
+                df_m_temp = pd.DataFrame(m_rec)
+                df_m_temp['period_date'] = pd.to_datetime(df_m_temp['month_code'], format='%Y-%m')
+                base_yr = df_m_temp['period_date'].apply(lambda d: d.year if d.month == 12 else d.year - 1).iloc[0]
+                file_processed_data.append({
+                    'base_year': base_yr,
+                    'monthly': m_rec,
+                    'benefits': b_rec,
+                    'providers': p_rec
+                })
+
+    if not file_processed_data:
+        return pd.DataFrame(columns=EXACT_BQ_COLUMNS_MONTHLY), pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS), pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
+
+    all_base_years = [item['base_year'] for item in file_processed_data]
+    max_global_year = max(all_base_years)
+
     all_monthly = []
     all_benefits = []
     all_providers = []
 
-    for f in uploaded_files:
-        if f.name.lower().endswith('.pdf'):
-            all_monthly.extend(parse_pdf_claims(f, session_id, default_members))
-            all_benefits.extend(parse_pdf_benefits(f, session_id))
-            all_providers.extend(parse_pdf_providers(f, session_id))
-
-    if not all_monthly:
-        return pd.DataFrame(columns=EXACT_BQ_COLUMNS_MONTHLY), pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS), pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
+    for item in file_processed_data:
+        b_yr = item['base_year']
+        p_year_label = f"{b_yr} / {b_yr + 1}"
+        p_year_code = 'CY' if b_yr == max_global_year else ('PY' if b_yr == max_global_year - 1 else 'P2Y')
+        
+        for m in item['monthly']:
+            m['policy_year'] = p_year_code
+            m['policy_year_label'] = p_year_label
+            all_monthly.append(m)
+            
+        for b in item['benefits']:
+            b['policy_year'] = p_year_code
+            b['policy_year_label'] = p_year_label
+            all_benefits.append(b)
+            
+        for p in item['providers']:
+            p['policy_year'] = p_year_code
+            p['policy_year_label'] = p_year_label
+            all_providers.append(p)
 
     df_monthly = pd.DataFrame(all_monthly)
-    df_monthly = df_monthly.groupby(['session_id', 'month_code', 'class_tier'], as_index=False).agg({
+    df_monthly = df_monthly.groupby(['session_id', 'month_code', 'class_tier', 'policy_year', 'policy_year_label'], as_index=False).agg({
         'created_at': 'first', 'month_weight': 'first', 'active_lives': 'max',
         'claims_count': 'sum', 'paid_claims_sar': 'sum', 'paid_claims_vat_sar': 'sum'
     })
 
-    df_monthly['period_date'] = pd.to_datetime(df_monthly['month_code'], format='%Y-%m')
-    df_monthly = df_monthly.sort_values('period_date').reset_index(drop=True)
-    
-    df_monthly['cycle_base_year'] = df_monthly['period_date'].apply(
-        lambda d: d.year if d.month == 12 else d.year - 1
-    )
-    df_monthly['policy_year_label'] = df_monthly['cycle_base_year'].astype(str) + " / " + (df_monthly['cycle_base_year'] + 1).astype(str)
-    
-    max_year = df_monthly['cycle_base_year'].max()
-    df_monthly['policy_year'] = df_monthly['cycle_base_year'].apply(
-        lambda y: 'CY' if y == max_year else ('PY' if y == max_year - 1 else 'P2Y')
-    )
-
-    # تحديد سنة الوثيقة الأحدث لكل فئة لتعميمها بدقة على الجداول الفرعية بناءً على نفس فئة الطبقة
-    class_latest_py = {}
-    class_latest_pyl = {}
-    for tier, group in df_monthly.groupby('class_tier'):
-        max_dt = group['period_date'].max()
-        match_row = group[group['period_date'] == max_dt].iloc[0]
-        class_latest_py[tier] = match_row['policy_year']
-        class_latest_pyl[tier] = match_row['policy_year_label']
-
-    default_py = 'CY'
-    default_pyl = df_monthly['policy_year_label'].iloc[-1] if not df_monthly.empty else "2025 / 2026"
-
     df_benefits = pd.DataFrame(all_benefits) if all_benefits else pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS)
     if not df_benefits.empty:
-        df_benefits['policy_year'] = df_benefits['class_tier'].map(class_latest_py).fillna(default_py)
-        df_benefits['policy_year_label'] = df_benefits['class_tier'].map(class_latest_pyl).fillna(default_pyl)
         df_benefits = df_benefits[EXACT_BQ_COLUMNS_BENEFITS]
 
     df_providers = pd.DataFrame(all_providers) if all_providers else pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
     if not df_providers.empty:
-        df_providers['policy_year'] = df_providers['class_tier'].map(class_latest_py).fillna(default_py)
-        df_providers['policy_year_label'] = df_providers['class_tier'].map(class_latest_pyl).fillna(default_pyl)
         df_providers = df_providers[EXACT_BQ_COLUMNS_PROVIDERS]
 
-    df_monthly = df_monthly.drop(columns=['period_date', 'cycle_base_year'])
     return df_monthly[EXACT_BQ_COLUMNS_MONTHLY], df_benefits, df_providers
 
 # 7. الرفع لـ BigQuery
