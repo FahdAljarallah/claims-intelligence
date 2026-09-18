@@ -64,6 +64,7 @@ def safe_clean_number(val):
 
 # 3. استخراج البيانات الشهرية
 def parse_pdf_claims(file_obj, session_id, default_members):
+    file_obj.seek(0)
     cleaned_records = []
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
@@ -120,8 +121,9 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                         })
     return cleaned_records
 
-# 4. استخراج جدول المنافع مع إزالة المسافات لضمان التوافق مع كافة صيغ الشركات
+# 4. استخراج جدول المنافع مع إعادة المؤشر
 def parse_pdf_benefits(file_obj, session_id):
+    file_obj.seek(0)
     benefit_records = []
     flexible_keywords = ['outpatient', 'inpatient', 'dental', 'optical', 'maternity', 'coverage', 'lab', 'consult', 'pharmacy']
     
@@ -173,8 +175,9 @@ def parse_pdf_benefits(file_obj, session_id):
                         })
     return benefit_records
 
-# 5. استخراج مقدمي الخدمة
+# 5. استخراج مقدمي الخدمة مع إعادة المؤشر
 def parse_pdf_providers(file_obj, session_id):
+    file_obj.seek(0)
     provider_records = []
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
