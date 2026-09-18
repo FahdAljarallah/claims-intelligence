@@ -62,7 +62,7 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# 3. استخراج البيانات الشهرية
+# 3. محرك استخراج البيانات الشهرية المتسامح مع الأسطر المنفصلة
 def parse_pdf_claims(file_obj, session_id, default_members):
     file_obj.seek(0)
     cleaned_records = []
@@ -73,6 +73,8 @@ def parse_pdf_claims(file_obj, session_id, default_members):
             if not page_text:
                 continue
             lines = page_text.split('\n')
+            
+            # تحديد فئة الطبقة
             for line in lines:
                 l_low = line.lower()
                 if "class type" in l_low or "class" in l_low:
@@ -81,47 +83,73 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                     elif "vip" in l_low:
                         current_tier = "CLASS VIP"
 
+            # قراءة الأسطر مع تتبع السياق للتواريخ المنفصلة
+            pending_month_code = None
             for line in lines:
                 line_clean = line.strip()
-                if any(kw in line_clean.lower() for kw in ['report date', 'total', 'subtotal', 'period', 'limit']):
+                if not line_clean or any(kw in line_clean.lower() for kw in ['report date', 'total', 'subtotal', 'period', 'limit', 'classification']):
                     continue
+                
                 date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line_clean)
                 if date_match:
                     month_num = date_match.group(1).zfill(2)
                     year_num = date_match.group(2)
-                    std_month_code = f"{year_num}-{month_num}"
+                    pending_month_code = f"{year_num}-{month_num}"
+                    
+                    # فحص إذا كانت الأرقام في نفس السطر
                     line_without_date = line_clean.replace(date_match.group(0), '')
                     tokens = [t.strip() for t in line_without_date.split() if t.strip()]
                     numeric_values = [safe_clean_number(t) for t in tokens if safe_clean_number(t) > 0 or t == '0']
                     
-                    if len(numeric_values) >= 8:
-                        lives, claims_cnt, amt_before_vat, amt_after_vat = numeric_values[1], numeric_values[2], numeric_values[3], numeric_values[4]
-                    elif len(numeric_values) == 7:
-                        lives, claims_cnt, amt_before_vat, amt_after_vat = numeric_values[0], numeric_values[1], numeric_values[2], numeric_values[3]
-                    elif len(numeric_values) == 5:
-                        lives, claims_cnt, amt_before_vat, amt_after_vat = numeric_values[1], numeric_values[2], numeric_values[3], numeric_values[4]
-                    elif len(numeric_values) == 4:
-                        lives, claims_cnt, amt_before_vat, amt_after_vat = numeric_values[0], numeric_values[1], numeric_values[2], numeric_values[3]
-                    elif len(numeric_values) == 3:
-                        lives, claims_cnt, amt_before_vat, amt_after_vat = 0, numeric_values[0], numeric_values[1], numeric_values[2]
-                    else:
-                        continue
+                    if len(numeric_values) >= 3:
+                        if len(numeric_values) >= 8:
+                            lives, claims_cnt, amt_before_vat, amt_after_vat = numeric_values[1], numeric_values[2], numeric_values[3], numeric_values[4]
+                        elif len(numeric_values) == 7:
+                            lives, claims_cnt, amt_before_vat, amt_after_vat = numeric_values[0], numeric_values[1], numeric_values[2], numeric_values[3]
+                        elif len(numeric_values) >= 4:
+                            lives, claims_cnt, amt_before_vat, amt_after_vat = numeric_values[0], numeric_values[1], numeric_values[2], numeric_values[3]
+                        else:
+                            lives, claims_cnt, amt_before_vat, amt_after_vat = 0, numeric_values[0], numeric_values[1], numeric_values[2]
                         
-                    if claims_cnt > 0 or amt_before_vat > 0:
-                        cleaned_records.append({
-                            'session_id': str(session_id),
-                            'created_at': pd.Timestamp.now(tz='UTC'),
-                            'month_code': std_month_code,
-                            'month_weight': 1,
-                            'class_tier': current_tier,
-                            'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
-                            'claims_count': int(claims_cnt),
-                            'paid_claims_sar': amt_before_vat,
-                            'paid_claims_vat_sar': amt_after_vat
-                        })
+                        if claims_cnt > 0 or amt_before_vat > 0:
+                            cleaned_records.append({
+                                'session_id': str(session_id),
+                                'created_at': pd.Timestamp.now(tz='UTC'),
+                                'month_code': pending_month_code,
+                                'month_weight': 1,
+                                'class_tier': current_tier,
+                                'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
+                                'claims_count': int(claims_cnt),
+                                'paid_claims_sar': amt_before_vat,
+                                'paid_claims_vat_sar': amt_after_vat
+                            })
+                        pending_month_code = None
+                elif pending_month_code:
+                    # السطر يحتوي على الأرقام الخاصة بالشهر السابق في السطر المستقل
+                    tokens = [t.strip() for t in line_clean.split() if t.strip()]
+                    numeric_values = [safe_clean_number(t) for t in tokens if safe_clean_number(t) > 0 or t == '0']
+                    if len(numeric_values) >= 3:
+                        if len(numeric_values) >= 6:
+                            lives, claims_cnt, amt_before_vat, amt_after_vat = numeric_values[0], numeric_values[1], numeric_values[2], numeric_values[3]
+                        else:
+                            lives, claims_cnt, amt_before_vat, amt_after_vat = 0, numeric_values[0], numeric_values[1], numeric_values[2]
+                        
+                        if claims_cnt > 0 or amt_before_vat > 0:
+                            cleaned_records.append({
+                                'session_id': str(session_id),
+                                'created_at': pd.Timestamp.now(tz='UTC'),
+                                'month_code': pending_month_code,
+                                'month_weight': 1,
+                                'class_tier': current_tier,
+                                'active_lives': int(lives) if lives > 0 else (int(default_members) if default_members else 100),
+                                'claims_count': int(claims_cnt),
+                                'paid_claims_sar': amt_before_vat,
+                                'paid_claims_vat_sar': amt_after_vat
+                            })
+                    pending_month_code = None
     return cleaned_records
 
-# 4. استخراج جدول المنافع مع إعادة المؤشر
+# 4. استخراج جدول المنافع
 def parse_pdf_benefits(file_obj, session_id):
     file_obj.seek(0)
     benefit_records = []
@@ -155,7 +183,6 @@ def parse_pdf_benefits(file_obj, session_id):
                     line_clean = line.strip()
                     if not line_clean or 'total' in l_nospace:
                         continue
-                    
                     if not any(kw in l_nospace for kw in flexible_keywords):
                         continue
                         
@@ -175,7 +202,7 @@ def parse_pdf_benefits(file_obj, session_id):
                         })
     return benefit_records
 
-# 5. استخراج مقدمي الخدمة مع إعادة المؤشر
+# 5. استخراج مقدمي الخدمة
 def parse_pdf_providers(file_obj, session_id):
     file_obj.seek(0)
     provider_records = []
@@ -381,7 +408,7 @@ if uploaded_files:
                     session_id = f"session_{uuid.uuid4().hex[:8]}"
                     st.session_state["active_session_id"] = session_id
 
-                    df_monthly, df_benefits, df_providers = process_all_files(uploaded_files, session_id, total_members)
+                    df_monthly, df_benefits, df_providers = process_all_files(uploaded_files, session_id, default_members)
                     
                     if df_monthly.empty:
                         raise ValueError("لم يتم العثور على أسطر مطالبات صالحة.")
