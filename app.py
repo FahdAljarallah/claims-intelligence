@@ -62,7 +62,7 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# 3. محرك استخراج البيانات الشهرية المتسامح مع الأسطر المنفصلة
+# 3. استخراج البيانات الشهرية
 def parse_pdf_claims(file_obj, session_id, default_members):
     file_obj.seek(0)
     cleaned_records = []
@@ -145,7 +145,7 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                     pending_month_code = None
     return cleaned_records
 
-# 4. استخراج جدول المنافع
+# 4. استخراج جدول المنافع مع رصد تفصيلي للسنوات
 def parse_pdf_benefits(file_obj, session_id):
     file_obj.seek(0)
     benefit_records = []
@@ -154,10 +154,18 @@ def parse_pdf_benefits(file_obj, session_id):
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
         is_benefit_section = False
+        detected_file_year = None
+        
         for page in pdf.pages:
             page_text = page.extract_text()
             if not page_text:
                 continue
+            
+            # اكتشاف سنة التقرير من ترويسة الصفحة
+            yr_match = re.search(r'\b(20\d{2})\b', page_text)
+            if yr_match and not detected_file_year:
+                detected_file_year = int(yr_match.group(1))
+
             lines = page_text.split('\n')
             for line in lines:
                 l_low = line.lower()
@@ -194,7 +202,8 @@ def parse_pdf_benefits(file_obj, session_id):
                             'benefit_name': benefit_name,
                             'claims_count': int(numeric_tokens[0]),
                             'paid_claims_sar': numeric_tokens[1],
-                            'paid_claims_vat_sar': numeric_tokens[2]
+                            'paid_claims_vat_sar': numeric_tokens[2],
+                            'detected_year': detected_file_year
                         })
     return benefit_records
 
@@ -205,10 +214,17 @@ def parse_pdf_providers(file_obj, session_id):
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
         is_provider_section = False
+        detected_file_year = None
+        
         for page in pdf.pages:
             page_text = page.extract_text()
             if not page_text:
                 continue
+            
+            yr_match = re.search(r'\b(20\d{2})\b', page_text)
+            if yr_match and not detected_file_year:
+                detected_file_year = int(yr_match.group(1))
+
             lines = page_text.split('\n')
             for line in lines:
                 l_low = line.lower()
@@ -243,11 +259,12 @@ def parse_pdf_providers(file_obj, session_id):
                                 'provider_name': prov_name,
                                 'claims_count': int(numeric_tokens[0]),
                                 'paid_claims_sar': numeric_tokens[1],
-                                'paid_claims_vat_sar': numeric_tokens[2]
+                                'paid_claims_vat_sar': numeric_tokens[2],
+                                'detected_year': detected_file_year
                             })
     return provider_records
 
-# 6. معالجة وتوزيع السنوات لكل ملف على حدة
+# 6. معالجة وتوزيع السنوات بناءً على النطاق الزمني الفعلي لكل ملف
 def process_all_files(uploaded_files, session_id, default_members):
     file_processed_data = []
 
@@ -291,11 +308,15 @@ def process_all_files(uploaded_files, session_id, default_members):
         for b in item['benefits']:
             b['policy_year'] = p_year_code
             b['policy_year_label'] = p_year_label
+            if 'detected_year' in b:
+                b.pop('detected_year', None)
             all_benefits.append(b)
             
         for p in item['providers']:
             p['policy_year'] = p_year_code
             p['policy_year_label'] = p_year_label
+            if 'detected_year' in p:
+                p.pop('detected_year', None)
             all_providers.append(p)
 
     df_monthly = pd.DataFrame(all_monthly)
