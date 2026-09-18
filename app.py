@@ -35,7 +35,7 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-# الأعمدة الصارمة المطابقة لمخططات جداول BigQuery الثلاثة
+# الأعمدة المطابقة لمخططات جداول BigQuery مع إدراج الحقول الزمنية الموحدة
 EXACT_BQ_COLUMNS_MONTHLY = [
     'session_id', 'created_at', 'policy_year', 'policy_year_label', 'month_code', 
     'month_weight', 'class_tier', 'active_lives', 'claims_count', 
@@ -43,17 +43,16 @@ EXACT_BQ_COLUMNS_MONTHLY = [
 ]
 
 EXACT_BQ_COLUMNS_BENEFITS = [
-    'session_id', 'created_at', 'class_tier', 'benefit_name', 'claims_count', 
-    'paid_claims_sar', 'paid_claims_vat_sar'
+    'session_id', 'created_at', 'policy_year', 'policy_year_label', 'class_tier', 
+    'benefit_name', 'claims_count', 'paid_claims_sar', 'paid_claims_vat_sar'
 ]
 
 EXACT_BQ_COLUMNS_PROVIDERS = [
-    'session_id', 'created_at', 'class_tier', 'provider_name', 'claims_count', 
-    'paid_claims_sar', 'paid_claims_vat_sar'
+    'session_id', 'created_at', 'policy_year', 'policy_year_label', 'class_tier', 
+    'provider_name', 'claims_count', 'paid_claims_sar', 'paid_claims_vat_sar'
 ]
 
 def safe_clean_number(val):
-    """تنظيف النصوص الرقمية والتعامل مع الفواصل والنقاط المكررة بدقة"""
     if pd.isna(val) or val is None:
         return 0.0
     val_str = str(val).replace('SAR', '').replace('ر.س', '').replace(',', '').strip()
@@ -63,7 +62,7 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# 3. محرك الاستخراج الشامل من ملفات الـ PDF (التعاونية وميدغلف)
+# 3. محرك الاستخراج الشامل من ملفات الـ PDF
 def parse_pdf_claims_comprehensive(file_obj, session_id, default_members):
     monthly_records = []
     benefit_records = []
@@ -102,7 +101,7 @@ def parse_pdf_claims_comprehensive(file_obj, session_id, default_members):
                 if any(kw in line_clean.lower() for kw in ['report date', 'total', 'subtotal', 'period', 'limit', 'classification', 'page']):
                     continue
                 
-                # أ. استخراج البيانات الشهرية (Monthly Claims)
+                # أ. البيانات الشهرية
                 if active_section == "MONTHLY":
                     date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line_clean)
                     if date_match:
@@ -116,25 +115,13 @@ def parse_pdf_claims_comprehensive(file_obj, session_id, default_members):
                         
                         if len(numeric_values) >= 4:
                             if len(numeric_values) >= 8:
-                                lives = numeric_values[1]
-                                claims_cnt = numeric_values[2]
-                                amt_before_vat = numeric_values[3]
-                                amt_after_vat = numeric_values[4]
+                                lives, claims_cnt, amt_before_vat, amt_after_vat = numeric_values[1], numeric_values[2], numeric_values[3], numeric_values[4]
                             elif len(numeric_values) == 7:
-                                lives = numeric_values[0]
-                                claims_cnt = numeric_values[1]
-                                amt_before_vat = numeric_values[2]
-                                amt_after_vat = numeric_values[3]
+                                lives, claims_cnt, amt_before_vat, amt_after_vat = numeric_values[0], numeric_values[1], numeric_values[2], numeric_values[3]
                             elif len(numeric_values) == 5:
-                                lives = numeric_values[1]
-                                claims_cnt = numeric_values[2]
-                                amt_before_vat = numeric_values[3]
-                                amt_after_vat = numeric_values[4]
+                                lives, claims_cnt, amt_before_vat, amt_after_vat = numeric_values[1], numeric_values[2], numeric_values[3], numeric_values[4]
                             else:
-                                lives = numeric_values[0]
-                                claims_cnt = numeric_values[1]
-                                amt_before_vat = numeric_values[2]
-                                amt_after_vat = numeric_values[3]
+                                lives, claims_cnt, amt_before_vat, amt_after_vat = numeric_values[0], numeric_values[1], numeric_values[2], numeric_values[3]
                                 
                             if claims_cnt > 0 or amt_before_vat > 0:
                                 monthly_records.append({
@@ -149,7 +136,7 @@ def parse_pdf_claims_comprehensive(file_obj, session_id, default_members):
                                     'paid_claims_vat_sar': amt_after_vat
                                 })
 
-                # ب. استخراج جدول المنافع (Breakdown by Benefit)
+                # ب. المنافع
                 if active_section == "BENEFITS":
                     if any(b in l_low for b in ['outpatient', 'inpatient', 'dental', 'optical', 'maternity', 'basic coverage', 'op lab', 'op consultation', 'op pharmacy']):
                         tokens = [t.strip() for t in line_clean.split() if t.strip()]
@@ -165,7 +152,7 @@ def parse_pdf_claims_comprehensive(file_obj, session_id, default_members):
                                 'paid_claims_vat_sar': numeric_tokens[2]
                             })
 
-                # ج. استخراج مقدمي الخدمة (Top Providers)
+                # ج. مقدمو الخدمة
                 if active_section == "PROVIDERS":
                     if not any(kw in l_low for kw in ['provider name', 'total', 'last policy year']):
                         tokens = [t.strip() for t in line_clean.split() if t.strip()]
@@ -185,7 +172,7 @@ def parse_pdf_claims_comprehensive(file_obj, session_id, default_members):
 
     return monthly_records, benefit_records, provider_records
 
-# 4. محرك استخراج البيانات من ملفات Excel و CSV
+# 4. استخراج Excel / CSV
 def parse_excel_or_csv(file_obj, session_id, default_members):
     if file_obj.name.endswith(('xlsx', 'xls')):
         excel_data = pd.read_excel(file_obj, sheet_name=None, header=None)
@@ -212,10 +199,8 @@ def parse_excel_or_csv(file_obj, session_id, default_members):
     for _, row in data_rows.iterrows():
         cell_val = str(row.iloc[0]).strip()
         cell_lower = cell_val.lower()
-
         if 'total' in cell_lower or cell_lower in ['nan', 'none', '']:
             continue
-
         raw_code = cell_val.replace('.0', '')
         if raw_code.isdigit() and len(raw_code) == 6:
             lives = safe_clean_number(row.iloc[1])
@@ -237,7 +222,7 @@ def parse_excel_or_csv(file_obj, session_id, default_members):
 
     return monthly_records, [], []
 
-# 5. معالجة وتجهيز كافة الملفات للرفع
+# 5. معالجة وتوزيع السنوات التعاقدية على كافة الجداول
 def process_all_files(uploaded_files, session_id, default_members):
     all_monthly = []
     all_benefits = []
@@ -258,12 +243,8 @@ def process_all_files(uploaded_files, session_id, default_members):
 
     df_monthly = pd.DataFrame(all_monthly)
     df_monthly = df_monthly.groupby(['session_id', 'month_code', 'class_tier'], as_index=False).agg({
-        'created_at': 'first',
-        'month_weight': 'first',
-        'active_lives': 'max',
-        'claims_count': 'sum',
-        'paid_claims_sar': 'sum',
-        'paid_claims_vat_sar': 'sum'
+        'created_at': 'first', 'month_weight': 'first', 'active_lives': 'max',
+        'claims_count': 'sum', 'paid_claims_sar': 'sum', 'paid_claims_vat_sar': 'sum'
     })
 
     df_monthly['period_date'] = pd.to_datetime(df_monthly['month_code'], format='%Y-%m')
@@ -280,16 +261,32 @@ def process_all_files(uploaded_files, session_id, default_members):
     )
     
     df_monthly = df_monthly.drop(columns=['period_date', 'cycle_base_year'])
-    
+
+    # توحيد واستنساخ أطر السنوات للبيانات الفرعية (Benefits & Providers) لتفادي ظهور null
+    default_py = 'CY'
+    default_pyl = df_monthly['policy_year_label'].iloc[-1] if not df_monthly.empty else "2024 / 2025"
+
     df_benefits = pd.DataFrame(all_benefits) if all_benefits else pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS)
+    if not df_benefits.empty:
+        df_benefits['policy_year'] = default_py
+        df_benefits['policy_year_label'] = default_pyl
+        df_benefits = df_benefits[EXACT_BQ_COLUMNS_BENEFITS]
+    else:
+        df_benefits = pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS)
+
     df_providers = pd.DataFrame(all_providers) if all_providers else pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
+    if not df_providers.empty:
+        df_providers['policy_year'] = default_py
+        df_providers['policy_year_label'] = default_pyl
+        df_providers = df_providers[EXACT_BQ_COLUMNS_PROVIDERS]
+    else:
+        df_providers = pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
 
     return df_monthly[EXACT_BQ_COLUMNS_MONTHLY], df_benefits, df_providers
 
-# 6. الرفع إلى BigQuery جداول متعددة
+# 6. الرفع إلى BigQuery
 def upload_data_to_bigquery(df_monthly, df_benefits, df_providers):
     client = get_bq_client()
-    
     datasets_map = {
         "monthly_performance": df_monthly,
         "benefits_breakdown": df_benefits,
@@ -370,37 +367,17 @@ st.markdown(t["subtitle"])
 col_date, col_members = st.columns(2)
 with col_date:
     inception_date = st.date_input(t["date_label"], value=None)
-
 with col_members:
-    total_members = st.number_input(
-        t["members_label"], 
-        min_value=1, 
-        max_value=1000000, 
-        value=None, 
-        step=1,
-        placeholder="مثال: 1,250"
-    )
+    total_members = st.number_input(t["members_label"], min_value=1, max_value=1000000, value=None, step=1, placeholder="مثال: 1,250")
 
 col_prem, _ = st.columns(2)
 with col_prem:
-    current_premium = st.number_input(
-        t["prem_label"], 
-        min_value=1000.0, 
-        max_value=500000000.0, 
-        value=None, 
-        step=50000.0,
-        format="%.2f",
-        placeholder="مثال: 4,500,000.00"
-    )
+    current_premium = st.number_input(t["prem_label"], min_value=1000.0, max_value=500000000.0, value=None, step=50000.0, format="%.2f", placeholder="مثال: 4,500,000.00")
 
 if current_premium:
     st.caption(f"SAR {current_premium:,.2f}")
 
-uploaded_files = st.file_uploader(
-    t["upload_label"], 
-    type=["pdf", "xlsx", "xls", "csv"], 
-    accept_multiple_files=True
-)
+uploaded_files = st.file_uploader(t["upload_label"], type=["pdf", "xlsx", "xls", "csv"], accept_multiple_files=True)
 
 if uploaded_files:
     if st.button(t["btn_process"], type="primary"):
@@ -435,7 +412,7 @@ if uploaded_files:
                 except Exception as e:
                     st.error(f"حدث خطأ أثناء معالجة الملف: {str(e)}")
 
-# 8. قسم حوكمة الجلسة
+# 8. حوكمة الجلسة
 if "active_session_id" in st.session_state:
     st.divider()
     st.subheader(t["session_mgmt"])
