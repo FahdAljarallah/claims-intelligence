@@ -35,7 +35,6 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-# الأعمدة الصارمة المطابقة لمخططات الجداول
 EXACT_BQ_COLUMNS_MONTHLY = [
     'session_id', 'created_at', 'policy_year', 'policy_year_label', 'month_code', 
     'month_weight', 'class_tier', 'active_lives', 'claims_count', 
@@ -115,9 +114,11 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                         })
     return cleaned_records
 
-# 4. استخراج جدول المنافع (Breakdown by Benefit) من الـ PDF بدقة
+# 4. محرك صارم لاستخراج جدول المنافع فقط (Breakdown by Benefit) وتجنب مقدمي الخدمة
 def parse_pdf_benefits(file_obj, session_id):
     benefit_records = []
+    valid_benefit_keywords = ['outpatient', 'inpatient', 'dental', 'optical', 'maternity', 'basic coverage', 'op lab', 'op consultation', 'op pharmacy']
+    
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
         is_benefit_section = False
@@ -134,22 +135,29 @@ def parse_pdf_benefits(file_obj, session_id):
                     elif "vip" in l_low:
                         current_tier = "CLASS VIP"
                 
+                # تفعيل رصد قسم المنافع
                 if "breakdown by benefit" in l_low or "breakdown by benefits" in l_low:
                     is_benefit_section = True
                     continue
-                elif "top 20 utilised" in l_low or "monthly claims" in l_low:
+                # الإيقاف الفوري فور دخول قسم مقدمي الخدمة أو التوتال العام
+                elif "top 20 utilised" in l_low or "top 20 utilized" in l_low or "monthly claims" in l_low:
                     is_benefit_section = False
+                    continue
 
                 if is_benefit_section:
                     line_clean = line.strip()
-                    if any(kw in line_clean.lower() for kw in ['benefit', 'total', 'page', 'classification', 'last policy year', 'pyr']):
+                    if not line_clean:
                         continue
+                    
+                    # التحقق الصارم: هل السطر يحتوي فعلاً على اسم منفعة طبية معتمدة؟
+                    if not any(kw in l_low for kw in valid_benefit_keywords):
+                        continue
+                        
                     tokens = [t.strip() for t in line_clean.split() if t.strip()]
                     numeric_tokens = [safe_clean_number(t) for t in tokens if safe_clean_number(t) > 0 or t == '0']
+                    
                     if len(numeric_tokens) >= 3:
-                        benefit_name = " ".join([t for t in tokens if not re.search(r'\d', t)])
-                        if not benefit_name:
-                            benefit_name = tokens[0]
+                        benefit_name = tokens[0]
                         benefit_records.append({
                             'session_id': str(session_id),
                             'created_at': pd.Timestamp.now(tz='UTC'),
@@ -195,7 +203,6 @@ def process_all_files(uploaded_files, session_id, default_members):
         lambda y: 'CY' if y == max_year else ('PY' if y == max_year - 1 else 'P2Y')
     )
     
-    # ربط ملصقات السنوات بجدول المنافع بناءً على أحدث دورة أو مطابقة الفترة
     df_benefits = pd.DataFrame(all_benefits) if all_benefits else pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS)
     if not df_benefits.empty:
         df_benefits['policy_year'] = 'CY'
