@@ -10,18 +10,12 @@ import pdfplumber
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
-# 1. إعداد واجهة التطبيق
-st.set_page_config(
-    page_title="Claims Intelligence Portal",
-    page_icon="📊",
-    layout="wide"
-)
+st.set_page_config(page_title="Claims Intelligence Portal", page_icon="📊", layout="wide")
 
 PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
 LOOKER_REPORT_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47/page/1f97F"
 
-# 2. إدارة الاتصال بمستودع بيانات BigQuery
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -62,7 +56,7 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# 3. استخراج البيانات الشهرية
+# استخراج بيانات الأداء الشهري مع التعامل مع الأسطر المنفصلة
 def parse_pdf_claims(file_obj, session_id, default_members):
     file_obj.seek(0)
     cleaned_records = []
@@ -145,12 +139,10 @@ def parse_pdf_claims(file_obj, session_id, default_members):
                     pending_month_code = None
     return cleaned_records
 
-# 4. استخراج جدول المنافع
 def parse_pdf_benefits(file_obj, session_id):
     file_obj.seek(0)
     benefit_records = []
     flexible_keywords = ['outpatient', 'inpatient', 'dental', 'optical', 'maternity', 'coverage', 'lab', 'consult', 'pharmacy']
-    
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
         is_benefit_section = False
@@ -162,29 +154,24 @@ def parse_pdf_benefits(file_obj, session_id):
             for line in lines:
                 l_low = line.lower()
                 l_nospace = l_low.replace(" ", "")
-                
                 if "class type" in l_low or "class" in l_low:
                     if "vip1" in l_low:
                         current_tier = "CLASS VIP1"
                     elif "vip" in l_low:
                         current_tier = "CLASS VIP"
-                
                 if "breakdown" in l_nospace:
                     is_benefit_section = True
                 elif "top20" in l_nospace or "monthlyclaims" in l_nospace:
                     is_benefit_section = False
                     continue
-
                 if is_benefit_section:
                     line_clean = line.strip()
                     if not line_clean or 'total' in l_nospace:
                         continue
                     if not any(kw in l_nospace for kw in flexible_keywords):
                         continue
-                        
                     tokens = [t.strip() for t in line_clean.split() if t.strip()]
                     numeric_tokens = [safe_clean_number(t) for t in tokens if safe_clean_number(t) > 0 or t == '0']
-                    
                     if len(numeric_tokens) >= 3:
                         benefit_name = tokens[0]
                         benefit_records.append({
@@ -198,7 +185,6 @@ def parse_pdf_benefits(file_obj, session_id):
                         })
     return benefit_records
 
-# 5. استخراج مقدمي الخدمة
 def parse_pdf_providers(file_obj, session_id):
     file_obj.seek(0)
     provider_records = []
@@ -213,20 +199,17 @@ def parse_pdf_providers(file_obj, session_id):
             for line in lines:
                 l_low = line.lower()
                 l_nospace = l_low.replace(" ", "")
-                
                 if "class type" in l_low or "class" in l_low:
                     if "vip1" in l_low:
                         current_tier = "CLASS VIP1"
                     elif "vip" in l_low:
                         current_tier = "CLASS VIP"
-                
                 if "top20" in l_nospace:
                     is_provider_section = True
                     continue
                 elif "monthlyclaims" in l_nospace or "breakdown" in l_nospace:
                     is_provider_section = False
                     continue
-
                 if is_provider_section:
                     line_clean = line.strip()
                     if not line_clean or any(kw in l_nospace for kw in ['providername', 'total', 'page', 'classification']):
@@ -247,7 +230,7 @@ def parse_pdf_providers(file_obj, session_id):
                             })
     return provider_records
 
-# 6. المعايرة الزمنية الدقيقة بناءً على أحدث شهر استخلصناه من كل ملف
+# المعالجة المباشرة وترتيب الملفات تنازلياً حسب ترتيب الرفع أو التوقيت لتوزيع CY, PY, PY-1
 def process_all_files(uploaded_files, session_id, default_members):
     file_processed_data = []
 
@@ -257,18 +240,15 @@ def process_all_files(uploaded_files, session_id, default_members):
             b_rec = parse_pdf_benefits(f, session_id)
             p_rec = parse_pdf_providers(f, session_id)
             
-            if m_rec:
-                df_m_temp = pd.DataFrame(m_rec)
-                df_m_temp['period_date'] = pd.to_datetime(df_m_temp['month_code'], format='%Y-%m', errors='coerce')
-                valid_dates = df_m_temp['period_date'].dropna()
-                # نعتمد أحدث سنة شهرية موجودة داخل هذا الملف كمرجع له
-                max_file_year = valid_dates.dt.year.max() if not valid_dates.empty else 2025
-                base_yr = max_file_year if max_file_year == 2026 or max_file_year >= 2025 else max_file_year
-            else:
-                base_yr = 2025
+            # استخراج سنة بارزة من ملف الـ PDF كمرجع افتراضي
+            f.seek(0)
+            text_sample = f.read(2000).decode('utf-8', errors='ignore')
+            years_found = re.findall(r'\b(20\d{2})\b', text_sample)
+            max_y = max([int(y) for y in years_found if 2020 <= int(y) <= 2030]) if years_found else 2025
 
             file_processed_data.append({
-                'base_year': base_yr,
+                'filename': f.name,
+                'detected_year': max_y,
                 'monthly': m_rec,
                 'benefits': b_rec,
                 'providers': p_rec
@@ -277,25 +257,22 @@ def process_all_files(uploaded_files, session_id, default_members):
     if not file_processed_data:
         return pd.DataFrame(columns=EXACT_BQ_COLUMNS_MONTHLY), pd.DataFrame(columns=EXACT_BQ_COLUMNS_BENEFITS), pd.DataFrame(columns=EXACT_BQ_COLUMNS_PROVIDERS)
 
-    # استخراج كل السنوات الفريدة وترتيبها تنازلياً (الأحدث هو الأول دائماً)
-    all_base_years = sorted(list(set([item['base_year'] for item in file_processed_data])), reverse=True)
-    
-    year_to_code = {}
-    for idx, yr in enumerate(all_base_years):
-        if idx == 0:
-            year_to_code[yr] = 'CY'
-        elif idx == 1:
-            year_to_code[yr] = 'PY'
-        else:
-            year_to_code[yr] = 'PY-1'
+    # ترتيب الملفات تنازلياً بحيث يكون الملف الأحدث هو الأول (CY)
+    file_processed_data = sorted(file_processed_data, key=lambda x: x['detected_year'], reverse=True)
 
     all_monthly = []
     all_benefits = []
     all_providers = []
 
-    for item in file_processed_data:
-        b_yr = item['base_year']
-        p_year_code = year_to_code.get(b_yr, 'PY')
+    for idx, item in enumerate(file_processed_data):
+        if idx == 0:
+            p_year_code = 'CY'
+        elif idx == 1:
+            p_year_code = 'PY'
+        else:
+            p_year_code = 'PY-1'
+            
+        b_yr = item['detected_year']
         p_year_label = f"{b_yr} / {b_yr + 1}"
         
         for m in item['monthly']:
@@ -337,7 +314,6 @@ def process_all_files(uploaded_files, session_id, default_members):
 
     return df_monthly, df_benefits, df_providers
 
-# 7. الرفع لـ BigQuery
 def upload_data_to_bigquery(df_monthly, df_benefits, df_providers):
     client = get_bq_client()
     datasets_map = {
@@ -370,7 +346,6 @@ def delete_session_data(target_session_id):
         except Exception:
             pass
 
-# 8. واجهة المستخدم
 i18n = {
     "AR": {
         "title": "مرصد المطالبات ومحاكاة التجديد | Claims Intelligence",
