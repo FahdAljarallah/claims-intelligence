@@ -40,12 +40,14 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# دالة استخراج الأداء الشهري مع الحفاظ على كافة الحقول
+# دالة استخراج الأداء الشهري مع التقاط ترويسة الجدول الفعلية من المستند
 def parse_pdf_claims_flexible(file_obj, session_id, default_members):
     file_obj.seek(0)
     cleaned_records = []
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
+        current_table_header = "Default Period"
+        
         for page in pdf.pages:
             page_text = page.extract_text()
             if not page_text:
@@ -54,6 +56,10 @@ def parse_pdf_claims_flexible(file_obj, session_id, default_members):
             
             for line in lines:
                 l_low = line.lower()
+                # التقاط ترويسة أو عنوان الجدول الداخلي الفعلي
+                if "last policy year" in l_low or "policy year" in l_low or "period" in l_low or "breakdown" in l_low:
+                    current_table_header = line.strip()
+                
                 if "class type" in l_low or "class" in l_low:
                     if "vip1" in l_low:
                         current_tier = "CLASS VIP1"
@@ -62,7 +68,7 @@ def parse_pdf_claims_flexible(file_obj, session_id, default_members):
 
             for line in lines:
                 line_clean = line.strip()
-                if not line_clean or any(kw in line_clean.lower() for kw in ['report date', 'total', 'subtotal', 'period', 'limit', 'classification', 'policy holder']):
+                if not line_clean or any(kw in line_clean.lower() for kw in ['report date', 'total', 'subtotal', 'limit', 'classification', 'policy holder']):
                     continue
                 
                 date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line_clean)
@@ -96,6 +102,7 @@ def parse_pdf_claims_flexible(file_obj, session_id, default_members):
                                 'created_at': pd.Timestamp.now(tz='UTC'),
                                 'policy_year': 'RAW_TEST',
                                 'policy_year_label': file_obj.name,
+                                'table_header': current_table_header, # ترويسة الجدول الداخلية المضافة حديثاً
                                 'month_code': month_code,
                                 'month_weight': 1.0,
                                 'class_tier': current_tier,
@@ -113,6 +120,7 @@ def parse_pdf_benefits(file_obj, session_id):
     flexible_keywords = ['outpatient', 'inpatient', 'dental', 'optical', 'maternity', 'coverage', 'lab', 'consult', 'pharmacy']
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
+        current_table_header = "Default Period"
         is_benefit_section = False
         for page in pdf.pages:
             page_text = page.extract_text()
@@ -122,6 +130,8 @@ def parse_pdf_benefits(file_obj, session_id):
             for line in lines:
                 l_low = line.lower()
                 l_nospace = l_low.replace(" ", "")
+                if "last policy year" in l_low or "policy year" in l_low or "breakdown" in l_nospace:
+                    current_table_header = line.strip()
                 if "class type" in l_low or "class" in l_low:
                     if "vip1" in l_low:
                         current_tier = "CLASS VIP1"
@@ -147,6 +157,7 @@ def parse_pdf_benefits(file_obj, session_id):
                             'created_at': pd.Timestamp.now(tz='UTC'),
                             'policy_year': 'RAW_TEST',
                             'policy_year_label': file_obj.name,
+                            'table_header': current_table_header,
                             'class_tier': current_tier,
                             'benefit_name': benefit_name,
                             'claims_count': int(numeric_tokens[0]),
@@ -161,6 +172,7 @@ def parse_pdf_providers(file_obj, session_id):
     provider_records = []
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
+        current_table_header = "Default Period"
         is_provider_section = False
         for page in pdf.pages:
             page_text = page.extract_text()
@@ -170,6 +182,8 @@ def parse_pdf_providers(file_obj, session_id):
             for line in lines:
                 l_low = line.lower()
                 l_nospace = l_low.replace(" ", "")
+                if "top20" in l_nospace:
+                    current_table_header = line.strip()
                 if "class type" in l_low or "class" in l_low:
                     if "vip1" in l_low:
                         current_tier = "CLASS VIP1"
@@ -195,6 +209,7 @@ def parse_pdf_providers(file_obj, session_id):
                                 'created_at': pd.Timestamp.now(tz='UTC'),
                                 'policy_year': 'RAW_TEST',
                                 'policy_year_label': file_obj.name,
+                                'table_header': current_table_header,
                                 'class_tier': current_tier,
                                 'provider_name': prov_name,
                                 'claims_count': int(numeric_tokens[0]),
@@ -248,7 +263,7 @@ def delete_session_data(target_session_id):
 i18n = {
     "AR": {
         "title": "مرصد المطالبات | محطة المعاينة التجريبية",
-        "subtitle": "قم برفع ملفات PDF (التعاونية أو ميدغلف) لمعاينة دقة الأعمدة وتحميلها قبل الضخ النهائي.",
+        "subtitle": "قم برفع ملفات PDF (التعاونية أو ميدغلف) لمعاينة دقة الأعمدة وترويسات الجداول وتحميلها.",
         "date_label": "تاريخ بداية سريان الوثيقة",
         "prem_label": "قسط الوثيقة السنوي الحالي (SAR)",
         "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
@@ -295,13 +310,12 @@ if uploaded_files:
                 st.session_state["preview_b"] = df_b
                 st.session_state["preview_p"] = df_p
                 st.session_state["temp_session_id"] = session_id
-                st.success("تم استخراج البيانات وجاهزة للمعاينة أدناه!")
+                st.success("تم استخراج البيانات وترويسات الجداول بنجاح وجاهزة للمعاينة أدناه!")
 
     if "preview_m" in st.session_state and not st.session_state["preview_m"].empty:
         st.subheader("🔍 معاينة جدول الأداء الشهري (Monthly Performance Preview)")
         st.dataframe(st.session_state["preview_m"], use_container_width=True)
         
-        # أزرار تحميل البيانات بصيغة CSV للعمل عليها وتطوير المنطق
         csv_m = st.session_state["preview_m"].to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 تحميل جدول الأداء الشهري كاملًا (CSV)",
