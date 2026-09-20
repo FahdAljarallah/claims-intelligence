@@ -40,10 +40,28 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# دالة استخراج الأداء الشهري مع التقاط ترويسة الجدول الفعلية من المستند
+# دالة استخراج تاريخ بداية الوثيقة (Inception Date) من الترويسة العليا للملف
+def extract_file_inception_date(file_obj):
+    file_obj.seek(0)
+    with pdfplumber.open(file_obj) as pdf:
+        for page in pdf.pages[:2]: # البحث في أول صفحتين كافٍ عادة للترويسة
+            text = page.extract_text()
+            if not text:
+                continue
+            for line in text.split('\n'):
+                l_low = line.lower()
+                if "inception" in l_low or "effective" in l_low or "period from" in l_low or "from date" in l_low:
+                    date_match = re.search(r'\b(20\d{2})[\/\-]?(0[1-9]|1[0-2])[\/\-]?(0[1-9]|[12]\d|3[01])\b|\b(0?[1-9]|1[0-2])[\/\-](0?[1-9]|[12]\d|3[01])[\/\-](20\d{2})\b', line)
+                    if date_match:
+                        return line.strip()
+    return "Not Specified"
+
+# دالة استخراج الأداء الشهري مع ترويسة الجدول وتاريخ السريان الموحد للملف
 def parse_pdf_claims_flexible(file_obj, session_id, default_members):
     file_obj.seek(0)
+    file_inception = extract_file_inception_date(file_obj)
     cleaned_records = []
+    
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
         current_table_header = "Default Period"
@@ -56,7 +74,6 @@ def parse_pdf_claims_flexible(file_obj, session_id, default_members):
             
             for line in lines:
                 l_low = line.lower()
-                # التقاط ترويسة أو عنوان الجدول الداخلي الفعلي
                 if "last policy year" in l_low or "policy year" in l_low or "period" in l_low or "breakdown" in l_low:
                     current_table_header = line.strip()
                 
@@ -102,7 +119,8 @@ def parse_pdf_claims_flexible(file_obj, session_id, default_members):
                                 'created_at': pd.Timestamp.now(tz='UTC'),
                                 'policy_year': 'RAW_TEST',
                                 'policy_year_label': file_obj.name,
-                                'table_header': current_table_header, # ترويسة الجدول الداخلية المضافة حديثاً
+                                'table_header': current_table_header,
+                                'policy_inception_date': file_inception, # حقل تاريخ البداية الموحد لكل ملف
                                 'month_code': month_code,
                                 'month_weight': 1.0,
                                 'class_tier': current_tier,
@@ -116,6 +134,7 @@ def parse_pdf_claims_flexible(file_obj, session_id, default_members):
 # دالة استخراج تفاصيل المنافع
 def parse_pdf_benefits(file_obj, session_id):
     file_obj.seek(0)
+    file_inception = extract_file_inception_date(file_obj)
     benefit_records = []
     flexible_keywords = ['outpatient', 'inpatient', 'dental', 'optical', 'maternity', 'coverage', 'lab', 'consult', 'pharmacy']
     with pdfplumber.open(file_obj) as pdf:
@@ -158,6 +177,7 @@ def parse_pdf_benefits(file_obj, session_id):
                             'policy_year': 'RAW_TEST',
                             'policy_year_label': file_obj.name,
                             'table_header': current_table_header,
+                            'policy_inception_date': file_inception,
                             'class_tier': current_tier,
                             'benefit_name': benefit_name,
                             'claims_count': int(numeric_tokens[0]),
@@ -169,6 +189,7 @@ def parse_pdf_benefits(file_obj, session_id):
 # دالة استخراج مقدمي الخدمة
 def parse_pdf_providers(file_obj, session_id):
     file_obj.seek(0)
+    file_inception = extract_file_inception_date(file_obj)
     provider_records = []
     with pdfplumber.open(file_obj) as pdf:
         current_tier = "CLASS VIP"
@@ -210,6 +231,7 @@ def parse_pdf_providers(file_obj, session_id):
                                 'policy_year': 'RAW_TEST',
                                 'policy_year_label': file_obj.name,
                                 'table_header': current_table_header,
+                                'policy_inception_date': file_inception,
                                 'class_tier': current_tier,
                                 'provider_name': prov_name,
                                 'claims_count': int(numeric_tokens[0]),
@@ -263,7 +285,7 @@ def delete_session_data(target_session_id):
 i18n = {
     "AR": {
         "title": "مرصد المطالبات | محطة المعاينة التجريبية",
-        "subtitle": "قم برفع ملفات PDF (التعاونية أو ميدغلف) لمعاينة دقة الأعمدة وترويسات الجداول وتحميلها.",
+        "subtitle": "قم برفع ملفات PDF متعددة لمعاينة أعمدة الترويسة وتاريخ السريان (Inception) وتحميلها.",
         "date_label": "تاريخ بداية سريان الوثيقة",
         "prem_label": "قسط الوثيقة السنوي الحالي (SAR)",
         "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
@@ -310,7 +332,7 @@ if uploaded_files:
                 st.session_state["preview_b"] = df_b
                 st.session_state["preview_p"] = df_p
                 st.session_state["temp_session_id"] = session_id
-                st.success("تم استخراج البيانات وترويسات الجداول بنجاح وجاهزة للمعاينة أدناه!")
+                st.success("تم استخراج البيانات، ترويسات الجداول، وتاريخ السريان بنجاح!")
 
     if "preview_m" in st.session_state and not st.session_state["preview_m"].empty:
         st.subheader("🔍 معاينة جدول الأداء الشهري (Monthly Performance Preview)")
