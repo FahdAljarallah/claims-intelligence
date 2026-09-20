@@ -44,19 +44,20 @@ def extract_file_inception_date(file_obj):
     file_obj.seek(0)
     try:
         with pdfplumber.open(file_obj) as pdf:
-            for page in pdf.pages[:2]:
+            for page in pdf.pages[:3]:
                 text = page.extract_text()
                 if not text:
                     continue
                 for line in text.split('\n'):
                     l_low = line.lower()
-                    if "inception" in l_low or "effective" in l_low or "period from" in l_low or "from date" in l_low or "processed to" in l_low:
+                    if any(kw in l_low for kw in ["inception", "effective", "period from", "from date", "processed to", "policy period"]):
                         return line.strip()
     except Exception:
         pass
     return "Not Specified"
 
-def parse_pdf_claims_flexible(file_obj, session_id, default_members):
+# محرك استخراج مرن ومتكيف لجميع أنواع ملفات شركات التأمين (التعاونية وميدغلف وغيرها)
+def parse_pdf_claims_adaptive(file_obj, session_id, default_members):
     file_obj.seek(0)
     file_inception = extract_file_inception_date(file_obj)
     cleaned_records = []
@@ -74,234 +75,80 @@ def parse_pdf_claims_flexible(file_obj, session_id, default_members):
                 
                 for line in lines:
                     l_low = line.lower()
-                    if "last policy year" in l_low or "policy year" in l_low or "period" in l_low or "breakdown" in l_low:
+                    if any(kw in l_low for kw in ["policy year", "period", "breakdown", "experience", "classification"]):
                         current_table_header = line.strip()
-                    
-                    if "class type" in l_low or "class" in l_low:
-                        if "vip1" in l_low:
+                    if "class" in l_low:
+                        if "vip1" in l_low or "class 1" in l_low:
                             current_tier = "CLASS VIP1"
-                        elif "vip" in l_low:
-                            current_tier = "CLASS VIP"
+                        elif "vip" in l_low or "class" in l_low:
+                            current_tier = line.strip()[:30]
 
                 for line in lines:
                     line_clean = line.strip()
-                    if not line_clean or any(kw in line_clean.lower() for kw in ['report date', 'total', 'subtotal', 'limit', 'classification', 'policy holder']):
+                    if not line_clean or any(kw in line_clean.lower() for kw in ['report date', 'total', 'subtotal', 'limit', 'classification', 'policy holder', 'page']):
                         continue
                     
-                    date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line_clean)
+                    # البحث عن أي نمط تاريخ بصيغة YYYY-MM أو MM/YYYY
+                    date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line_clean)
                     if date_match:
-                        month_num = date_match.group(1).zfill(2)
-                        year_num = date_match.group(2)
-                        month_code = f"{year_num}-{month_num}"
+                        if date_match.group(1) and date_match.group(2):
+                            month_code = f"{date_match.group(1)}-{date_match.group(2).zfill(2)}"
+                        else:
+                            month_code = f"{date_match.group(4)}-{date_match.group(3).zfill(2)}"
                         
                         tokens = [t.strip() for t in line_clean.split() if t.strip()]
-                        numeric_vals = []
-                        for t in tokens:
-                            cleaned_val = safe_clean_number(t)
-                            if t != date_match.group(0) and t != year_num:
-                                numeric_vals.append(cleaned_val)
+                        numeric_vals = [safe_clean_number(t) for t in tokens if re.search(r'\d', t)]
                         
-                        if len(numeric_vals) >= 3:
-                            if len(numeric_vals) >= 5 and numeric_vals[0] in list(range(1, 32)):
-                                lives = numeric_vals[1]
-                                claims_cnt = numeric_vals[2]
-                                amt_before = numeric_vals[3]
-                                amt_after = numeric_vals[4] if len(numeric_vals) > 4 else amt_before
-                            else:
-                                lives = numeric_vals[0]
-                                claims_cnt = numeric_vals[1]
-                                amt_before = numeric_vals[2]
-                                amt_after = numeric_vals[3] if len(numeric_vals) > 3 else amt_before
+                        if len(numeric_vals) >= 2:
+                            # التقاط القيم بمرونة بغض النظر عن ترتيب الأعمدة
+                            lives = numeric_vals[0] if numeric_vals[0] > 5 else default_members
+                            claims_cnt = numeric_vals[1] if len(numeric_vals) > 1 else 0
+                            amt_before = numeric_vals[2] if len(numeric_vals) > 2 else (numeric_vals[1] if len(numeric_vals) == 2 else 0.0)
+                            amt_after = numeric_vals[3] if len(numeric_vals) > 3 else amt_before
                             
-                            if claims_cnt > 0 or amt_before > 0:
-                                cleaned_records.append({
-                                    'session_id': str(session_id),
-                                    'created_at': pd.Timestamp.now(tz='UTC'),
-                                    'policy_year': 'RAW_TEST',
-                                    'policy_year_label': file_obj.name,
-                                    'table_header': current_table_header,
-                                    'policy_inception_date': file_inception,
-                                    'month_code': month_code,
-                                    'month_weight': 1.0,
-                                    'class_tier': current_tier,
-                                    'active_lives': int(lives) if lives > 5 else (int(default_members) if default_members else 100),
-                                    'claims_count': int(claims_cnt),
-                                    'paid_claims_sar': float(amt_before),
-                                    'paid_claims_vat_sar': float(amt_after)
-                                })
-    except Exception as e:
-        st.error(f"خطأ في قراءة الملف {file_obj.name}: {str(e)}")
-        
-    return cleaned_records
-
-def parse_pdf_benefits(file_obj, session_id):
-    file_obj.seek(0)
-    file_inception = extract_file_inception_date(file_obj)
-    benefit_records = []
-    flexible_keywords = ['outpatient', 'inpatient', 'dental', 'optical', 'maternity', 'coverage', 'lab', 'consult', 'pharmacy']
-    try:
-        with pdfplumber.open(file_obj) as pdf:
-            current_tier = "CLASS VIP"
-            current_table_header = "Default Period"
-            is_benefit_section = False
-            for page in pdf.pages:
-                page_text = page.extract_text()
-                if not page_text:
-                    continue
-                lines = page_text.split('\n')
-                for line in lines:
-                    l_low = line.lower()
-                    l_nospace = l_low.replace(" ", "")
-                    if "last policy year" in l_low or "policy year" in l_low or "breakdown" in l_nospace:
-                        current_table_header = line.strip()
-                    if "class type" in l_low or "class" in l_low:
-                        if "vip1" in l_low:
-                            current_tier = "CLASS VIP1"
-                        elif "vip" in l_low:
-                            current_tier = "CLASS VIP"
-                    if "breakdown" in l_nospace:
-                        is_benefit_section = True
-                    elif "top20" in l_nospace or "monthlyclaims" in l_nospace:
-                        is_benefit_section = False
-                        continue
-                    if is_benefit_section:
-                        line_clean = line.strip()
-                        if not line_clean or 'total' in l_nospace:
-                            continue
-                        if not any(kw in l_nospace for kw in flexible_keywords):
-                            continue
-                        tokens = [t.strip() for t in line_clean.split() if t.strip()]
-                        numeric_tokens = [safe_clean_number(t) for t in tokens if safe_clean_number(t) > 0 or t == '0']
-                        if len(numeric_tokens) >= 3:
-                            benefit_name = tokens[0]
-                            benefit_records.append({
+                            cleaned_records.append({
                                 'session_id': str(session_id),
                                 'created_at': pd.Timestamp.now(tz='UTC'),
                                 'policy_year': 'RAW_TEST',
                                 'policy_year_label': file_obj.name,
                                 'table_header': current_table_header,
                                 'policy_inception_date': file_inception,
+                                'month_code': month_code,
+                                'month_weight': 1.0,
                                 'class_tier': current_tier,
-                                'benefit_name': benefit_name,
-                                'claims_count': int(numeric_tokens[0]),
-                                'paid_claims_sar': numeric_tokens[1],
-                                'paid_claims_vat_sar': numeric_tokens[2]
+                                'active_lives': int(lives) if lives > 0 else int(default_members),
+                                'claims_count': int(claims_cnt),
+                                'paid_claims_sar': float(amt_before),
+                                'paid_claims_vat_sar': float(amt_after)
                             })
-    except Exception:
-        pass
-    return benefit_records
-
-def parse_pdf_providers(file_obj, session_id):
-    file_obj.seek(0)
-    file_inception = extract_file_inception_date(file_obj)
-    provider_records = []
-    try:
-        with pdfplumber.open(file_obj) as pdf:
-            current_tier = "CLASS VIP"
-            current_table_header = "Default Period"
-            is_provider_section = False
-            for page in pdf.pages:
-                page_text = page.extract_text()
-                if not page_text:
-                    continue
-                lines = page_text.split('\n')
-                for line in lines:
-                    l_low = line.lower()
-                    l_nospace = l_low.replace(" ", "")
-                    if "top20" in l_nospace:
-                        current_table_header = line.strip()
-                    if "class type" in l_low or "class" in l_low:
-                        if "vip1" in l_low:
-                            current_tier = "CLASS VIP1"
-                        elif "vip" in l_low:
-                            current_tier = "CLASS VIP"
-                    if "top20" in l_nospace:
-                        is_provider_section = True
-                        continue
-                    elif "monthlyclaims" in l_nospace or "breakdown" in l_nospace:
-                        is_provider_section = False
-                        continue
-                    if is_provider_section:
-                        line_clean = line.strip()
-                        if not line_clean or any(kw in l_nospace for kw in ['providername', 'total', 'page', 'classification']):
-                            continue
-                        tokens = [t.strip() for t in line_clean.split() if t.strip()]
-                        numeric_tokens = [safe_clean_number(t) for t in tokens if safe_clean_number(t) > 0 or t == '0']
-                        if len(numeric_tokens) >= 3:
-                            prov_name = " ".join([t for t in tokens if not re.search(r'\d', t)])
-                            if len(prov_name) > 3:
-                                provider_records.append({
-                                    'session_id': str(session_id),
-                                    'created_at': pd.Timestamp.now(tz='UTC'),
-                                    'policy_year': 'RAW_TEST',
-                                    'policy_year_label': file_obj.name,
-                                    'table_header': current_table_header,
-                                    'policy_inception_date': file_inception,
-                                    'class_tier': current_tier,
-                                    'provider_name': prov_name,
-                                    'claims_count': int(numeric_tokens[0]),
-                                    'paid_claims_sar': numeric_tokens[1],
-                                    'paid_claims_vat_sar': numeric_tokens[2]
-                                })
-    except Exception:
-        pass
-    return provider_records
+    except Exception as e:
+        st.error(f"خطأ في قراءة الملف {file_obj.name}: {str(e)}")
+        
+    return cleaned_records
 
 def process_preview_files(uploaded_files, session_id, default_members):
-    all_m, all_b, all_p = [], [], []
+    all_m = []
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
-            # التأكد من إعادة المؤشر ومعالجة كل ملف بشكل قاطع
             f.seek(0)
-            m_recs = parse_pdf_claims_flexible(f, session_id, default_members)
-            f.seek(0)
-            b_recs = parse_pdf_benefits(f, session_id)
-            f.seek(0)
-            p_recs = parse_pdf_providers(f, session_id)
-            
+            m_recs = parse_pdf_claims_adaptive(f, session_id, default_members)
             all_m.extend(m_recs)
-            all_b.extend(b_recs)
-            all_p.extend(p_recs)
-            
-    return pd.DataFrame(all_m), pd.DataFrame(all_b), pd.DataFrame(all_p)
+    return pd.DataFrame(all_m), pd.DataFrame(), pd.DataFrame()
 
-def upload_data_to_bigquery(df_monthly, df_benefits, df_providers):
+def upload_data_to_bigquery(df_monthly):
     client = get_bq_client()
-    datasets_map = {
-        "monthly_performance": df_monthly,
-        "benefits_breakdown": df_benefits,
-        "top_providers": df_providers
-    }
-    for table_name, df_data in datasets_map.items():
-        if df_data.empty:
-            continue
-        table_ref = f"{PROJECT_ID}.{DATASET_ID}.{table_name}"
-        job_config = bigquery.LoadJobConfig(
-            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-            create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
-            schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
-            autodetect=True
-        )
-        job = client.load_table_from_dataframe(df_data, table_ref, job_config=job_config)
-        job.result()
+    table_ref = f"{PROJECT_ID}.{DATASET_ID}.monthly_performance"
+    job_config = bigquery.LoadJobConfig(
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
+        schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
+        autodetect=True
+    )
+    job = client.load_table_from_dataframe(df_monthly, table_ref, job_config=job_config)
+    job.result()
 
-def delete_session_data(target_session_id):
-    client = get_bq_client()
-    for t in ["monthly_performance", "benefits_breakdown", "top_providers"]:
-        try:
-            query = f"DELETE FROM `{PROJECT_ID}.{DATASET_ID}.{t}` WHERE session_id = @sid"
-            job_config = bigquery.QueryJobConfig(
-                query_parameters=[bigquery.ScalarQueryParameter("sid", "STRING", target_session_id)]
-            )
-            client.query(query, job_config=job_config).result()
-        except Exception:
-            pass
-
-selected_lang = st.selectbox("Language / اللغة", options=["العربية", "English"], index=0)
-lang_code = "AR" if selected_lang == "العربية" else "EN"
-
-st.title("مرصد المطالبات | محطة المعاينة الشاملة")
-st.markdown("رفع ملفات متعددة (التعاونية + ميدغلف) لاستخراج Inception وتاريخ السريان والترويسات لكل ملف على حدة.")
+st.title("مرصد المطالبات | محطة المعاينة المتكيفة")
+st.markdown("معالجة ودمج ملفات متعددة (التعاونية + ميدغلف) بمرونة تامة.")
 
 col_date, col_members = st.columns(2)
 with col_date:
@@ -318,36 +165,24 @@ uploaded_files = st.file_uploader("رفع ملفات تجربة المطالبا
 if uploaded_files:
     session_id = f"session_{uuid.uuid4().hex[:8]}"
     
-    if st.button("معاينة البيانات المستخرجة من كافة الملفات", type="secondary"):
+    if st.button("معاينة البيانات المتكيفة لكافة الملفات", type="secondary"):
         if not current_premium or not total_members or not inception_date:
             st.warning("يرجى تعبئة الحقول الأساسية.")
         else:
-            with st.spinner("جاري استخراج المعالجة الشاملة للملفات..."):
-                df_m, df_b, df_p = process_preview_files(uploaded_files, session_id, total_members)
+            with st.spinner("جاري استخراج ومعالجة الملفات..."):
+                df_m, _, _ = process_preview_files(uploaded_files, session_id, total_members)
                 st.session_state["preview_m"] = df_m
-                st.session_state["preview_b"] = df_b
-                st.session_state["preview_p"] = df_p
                 st.session_state["temp_session_id"] = session_id
-                st.success(f"تمت قراءة {len(uploaded_files)} ملفات بنجاح وإعداد الجداول!")
+                st.success(f"تمت معالجة الملفات بنجاح واستخراج {len(df_m)} سجلاً!")
 
     if "preview_m" in st.session_state and not st.session_state["preview_m"].empty:
-        st.subheader("🔍 معاينة جدول الأداء الشهري المجمع (Monthly Performance Preview)")
+        st.subheader("🔍 معاينة جدول الأداء المجمع (Adaptive Preview)")
         st.dataframe(st.session_state["preview_m"], use_container_width=True)
         
         csv_m = st.session_state["preview_m"].to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 تحميل جدول الأداء الشهري كاملًا (CSV)",
+            label="📥 تحميل جدول الأداء كاملًا (CSV)",
             data=csv_m,
-            file_name="monthly_performance_preview_all.csv",
+            file_name="adaptive_monthly_performance.csv",
             mime="text/csv",
         )
-        
-        if st.button("اعتماد وضخ البيانات إلى BigQuery", type="primary"):
-            with st.spinner("جاري الضخ إلى المستودع..."):
-                upload_data_to_bigquery(
-                    st.session_state["preview_m"], 
-                    st.session_state["preview_b"], 
-                    st.session_state["preview_p"]
-                )
-                st.session_state["active_session_id"] = st.session_state["temp_session_id"]
-                st.success("تم الضخ بنجاح!")
