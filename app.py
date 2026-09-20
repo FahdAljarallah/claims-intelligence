@@ -40,7 +40,6 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# دالة استخراج تاريخ بداية الوثيقة (Inception Date) من الترويسة العليا للملف
 def extract_file_inception_date(file_obj):
     file_obj.seek(0)
     try:
@@ -51,15 +50,12 @@ def extract_file_inception_date(file_obj):
                     continue
                 for line in text.split('\n'):
                     l_low = line.lower()
-                    if "inception" in l_low or "effective" in l_low or "period from" in l_low or "from date" in l_low:
-                        date_match = re.search(r'\b(20\d{2})[\/\-]?(0[1-9]|1[0-2])[\/\-]?(0[1-9]|[12]\d|3[01])\b|\b(0?[1-9]|1[0-2])[\/\-](0?[1-9]|[12]\d|3[01])[\/\-](20\d{2})\b', line)
-                        if date_match:
-                            return line.strip()
+                    if "inception" in l_low or "effective" in l_low or "period from" in l_low or "from date" in l_low or "processed to" in l_low:
+                        return line.strip()
     except Exception:
         pass
     return "Not Specified"
 
-# دالة استخراج الأداء الشهري مع ضمان قراءة كل ملف مستقل
 def parse_pdf_claims_flexible(file_obj, session_id, default_members):
     file_obj.seek(0)
     file_inception = extract_file_inception_date(file_obj)
@@ -134,11 +130,10 @@ def parse_pdf_claims_flexible(file_obj, session_id, default_members):
                                     'paid_claims_vat_sar': float(amt_after)
                                 })
     except Exception as e:
-        st.error(f"خطأ أثناء قراءة الملف {file_obj.name}: {str(e)}")
+        st.error(f"خطأ في قراءة الملف {file_obj.name}: {str(e)}")
         
     return cleaned_records
 
-# دالة استخراج تفاصيل المنافع
 def parse_pdf_benefits(file_obj, session_id):
     file_obj.seek(0)
     file_inception = extract_file_inception_date(file_obj)
@@ -196,7 +191,6 @@ def parse_pdf_benefits(file_obj, session_id):
         pass
     return benefit_records
 
-# دالة استخراج مقدمي الخدمة
 def parse_pdf_providers(file_obj, session_id):
     file_obj.seek(0)
     file_inception = extract_file_inception_date(file_obj)
@@ -257,9 +251,12 @@ def process_preview_files(uploaded_files, session_id, default_members):
     all_m, all_b, all_p = [], [], []
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
-            # معالجة كل ملف بشكل مستقل تماماً وضمان دمج نتائجه
+            # التأكد من إعادة المؤشر ومعالجة كل ملف بشكل قاطع
+            f.seek(0)
             m_recs = parse_pdf_claims_flexible(f, session_id, default_members)
+            f.seek(0)
             b_recs = parse_pdf_benefits(f, session_id)
+            f.seek(0)
             p_recs = parse_pdf_providers(f, session_id)
             
             all_m.extend(m_recs)
@@ -300,91 +297,52 @@ def delete_session_data(target_session_id):
         except Exception:
             pass
 
-i18n = {
-    "AR": {
-        "title": "مرصد المطالبات | محطة المعاينة التجريبية",
-        "subtitle": "قم برفع ملفات PDF متعددة لمعاينة أعمدة الترويسة وتاريخ السريان وضمان معالجة كافة الملفات.",
-        "date_label": "تاريخ بداية سريان الوثيقة",
-        "prem_label": "قسط الوثيقة السنوي الحالي (SAR)",
-        "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
-        "upload_label": "رفع ملفات تجربة المطالبات (PDF)",
-        "btn_preview": "معاينة البيانات المستخرجة",
-        "btn_push": "اعتماد وضخ البيانات إلى BigQuery",
-        "processing": "جاري معالجة المستندات...",
-        "success": "تم ضخ البيانات بنجاح للجلسة: ",
-        "warn_inputs": "يرجى تعبئة الحقول الأساسية.",
-        "btn_end_session": "إنهاء الجلسة وحذف البيانات",
-        "session_cleared": "تم حذف بيانات الجلسة بنجاح."
-    }
-}
-
 selected_lang = st.selectbox("Language / اللغة", options=["العربية", "English"], index=0)
 lang_code = "AR" if selected_lang == "العربية" else "EN"
-t = i18n[lang_code]
 
-st.title(t["title"])
-st.markdown(t["subtitle"])
+st.title("مرصد المطالبات | محطة المعاينة الشاملة")
+st.markdown("رفع ملفات متعددة (التعاونية + ميدغلف) لاستخراج Inception وتاريخ السريان والترويسات لكل ملف على حدة.")
 
 col_date, col_members = st.columns(2)
 with col_date:
-    inception_date = st.date_input(t["date_label"], value=None)
+    inception_date = st.date_input("تاريخ بداية سريان الوثيقة", value=None)
 with col_members:
-    total_members = st.number_input(t["members_label"], min_value=1, max_value=1000000, value=None, step=1)
+    total_members = st.number_input("إجمالي عدد المؤمن عليهم (Lives)", min_value=1, max_value=1000000, value=None, step=1)
 
 col_prem, _ = st.columns(2)
 with col_prem:
-    current_premium = st.number_input(t["prem_label"], min_value=1000.0, max_value=500000000.0, value=None, step=50000.0, format="%.2f")
+    current_premium = st.number_input("قسط الوثيقة السنوي الحالي (SAR)", min_value=1000.0, max_value=500000000.0, value=None, step=50000.0, format="%.2f")
 
-uploaded_files = st.file_uploader(t["upload_label"], type=["pdf"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("رفع ملفات تجربة المطالبات (PDF)", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
     session_id = f"session_{uuid.uuid4().hex[:8]}"
     
-    if st.button(t["btn_preview"], type="secondary"):
+    if st.button("معاينة البيانات المستخرجة من كافة الملفات", type="secondary"):
         if not current_premium or not total_members or not inception_date:
-            st.warning(t["warn_inputs"])
+            st.warning("يرجى تعبئة الحقول الأساسية.")
         else:
-            with st.spinner(t["processing"]):
+            with st.spinner("جاري استخراج المعالجة الشاملة للملفات..."):
                 df_m, df_b, df_p = process_preview_files(uploaded_files, session_id, total_members)
                 st.session_state["preview_m"] = df_m
                 st.session_state["preview_b"] = df_b
                 st.session_state["preview_p"] = df_p
                 st.session_state["temp_session_id"] = session_id
-                st.success("تم استخراج البيانات من كافة الملفات المرفوعة بنجاح وجاهزة للمعاينة!")
+                st.success(f"تمت قراءة {len(uploaded_files)} ملفات بنجاح وإعداد الجداول!")
 
     if "preview_m" in st.session_state and not st.session_state["preview_m"].empty:
-        st.subheader("🔍 معاينة جدول الأداء الشهري (Monthly Performance Preview)")
+        st.subheader("🔍 معاينة جدول الأداء الشهري المجمع (Monthly Performance Preview)")
         st.dataframe(st.session_state["preview_m"], use_container_width=True)
         
         csv_m = st.session_state["preview_m"].to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 تحميل جدول الأداء الشهري كاملًا (CSV)",
             data=csv_m,
-            file_name="monthly_performance_preview.csv",
+            file_name="monthly_performance_preview_all.csv",
             mime="text/csv",
         )
         
-        st.subheader("🔍 معاينة جدول المنافع (Benefits Breakdown Preview)")
-        st.dataframe(st.session_state["preview_b"], use_container_width=True)
-        csv_b = st.session_state["preview_b"].to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 تحميل جدول المنافع كاملًا (CSV)",
-            data=csv_b,
-            file_name="benefits_breakdown_preview.csv",
-            mime="text/csv",
-        )
-
-        st.subheader("🔍 معاينة جدول مقدمي الخدمة (Top Providers Preview)")
-        st.dataframe(st.session_state["preview_p"], use_container_width=True)
-        csv_p = st.session_state["preview_p"].to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 تحميل جدول مقدمي الخدمة كاملًا (CSV)",
-            data=csv_p,
-            file_name="top_providers_preview.csv",
-            mime="text/csv",
-        )
-
-        if st.button(t["btn_push"], type="primary"):
+        if st.button("اعتماد وضخ البيانات إلى BigQuery", type="primary"):
             with st.spinner("جاري الضخ إلى المستودع..."):
                 upload_data_to_bigquery(
                     st.session_state["preview_m"], 
@@ -392,27 +350,4 @@ if uploaded_files:
                     st.session_state["preview_p"]
                 )
                 st.session_state["active_session_id"] = st.session_state["temp_session_id"]
-                
-                url_params = {
-                    "ds14.p_session_id": st.session_state["active_session_id"],
-                    "ds15.p_session_id": st.session_state["active_session_id"],
-                    "ds16.p_session_id": st.session_state["active_session_id"],
-                    "ds14.param_language": lang_code,
-                    "ds14.p_current_premium": int(current_premium),
-                    "ds14.p_target_census": int(total_members),
-                    "ts": int(time.time())
-                }
-                encoded_params = urllib.parse.urlencode({"params": json.dumps(url_params)})
-                base_view_url = LOOKER_REPORT_URL.replace("/edit", "/view")
-                target_url = f"{base_view_url}?{encoded_params}"
-
-                st.success(f"{t['success']} `{st.session_state['active_session_id']}`")
-                st.link_button(label="الانتقال إلى لوحة المؤشرات النهائية", url=target_url, type="primary")
-
-if "active_session_id" in st.session_state:
-    st.divider()
-    if st.button(t["btn_end_session"], type="secondary"):
-        delete_session_data(st.session_state["active_session_id"])
-        del st.session_state["active_session_id"]
-        st.success(t["session_cleared"])
-        st.rerun()
+                st.success("تم الضخ بنجاح!")
