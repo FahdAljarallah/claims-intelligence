@@ -56,8 +56,8 @@ def extract_file_inception_date(file_obj):
         pass
     return "Not Specified"
 
-# محرك استخراج مرن ومتكيف لجميع أنواع ملفات شركات التأمين (التعاونية وميدغلف وغيرها)
-def parse_pdf_claims_adaptive(file_obj, session_id, default_members):
+# محرك استخراج متطور يدعم التنسيقات المتفرقة (ميدغلف والتعاونية)
+def parse_pdf_claims_advanced(file_obj, session_id, default_members):
     file_obj.seek(0)
     file_inception = extract_file_inception_date(file_obj)
     cleaned_records = []
@@ -71,40 +71,43 @@ def parse_pdf_claims_adaptive(file_obj, session_id, default_members):
                 page_text = page.extract_text()
                 if not page_text:
                     continue
-                lines = page_text.split('\n')
+                lines = [l.strip() for l in page_text.split('\n') if l.strip()]
                 
-                for line in lines:
+                i = 0
+                while i < len(lines):
+                    line = lines[i]
                     l_low = line.lower()
-                    if any(kw in l_low for kw in ["policy year", "period", "breakdown", "experience", "classification"]):
-                        current_table_header = line.strip()
-                    if "class" in l_low:
+                    
+                    if any(kw in l_low for kw in ["policy year", "period", "breakdown", "experience", "classification", "last policy year"]):
+                        current_table_header = line
+                    if "class type" in l_low or "class" in l_low:
                         if "vip1" in l_low or "class 1" in l_low:
                             current_tier = "CLASS VIP1"
-                        elif "vip" in l_low or "class" in l_low:
-                            current_tier = line.strip()[:30]
-
-                for line in lines:
-                    line_clean = line.strip()
-                    if not line_clean or any(kw in line_clean.lower() for kw in ['report date', 'total', 'subtotal', 'limit', 'classification', 'policy holder', 'page']):
-                        continue
+                        elif "vip" in l_low:
+                            current_tier = line[:35]
                     
-                    # البحث عن أي نمط تاريخ بصيغة YYYY-MM أو MM/YYYY
-                    date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line_clean)
+                    # البحث عن نمط الشهر (مثل 11/2025 أو 2023-12)
+                    date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line)
                     if date_match:
                         if date_match.group(1) and date_match.group(2):
                             month_code = f"{date_match.group(1)}-{date_match.group(2).zfill(2)}"
                         else:
                             month_code = f"{date_match.group(4)}-{date_match.group(3).zfill(2)}"
                         
-                        tokens = [t.strip() for t in line_clean.split() if t.strip()]
-                        numeric_vals = [safe_clean_number(t) for t in tokens if re.search(r'\d', t)]
+                        # تجميع الأرقام السياقية من الأسطر القريبة لتجنب مشكلة تفرّق الأعمدة في ميدغلف
+                        context_numbers = []
+                        for j in range(i, min(i + 8, len(lines))):
+                            potential_nums = re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', lines[j])
+                            for num_str in potential_nums:
+                                clean_val = safe_clean_number(num_str)
+                                if clean_val > 0 or num_str == '0':
+                                    context_numbers.append(clean_val)
                         
-                        if len(numeric_vals) >= 2:
-                            # التقاط القيم بمرونة بغض النظر عن ترتيب الأعمدة
-                            lives = numeric_vals[0] if numeric_vals[0] > 5 else default_members
-                            claims_cnt = numeric_vals[1] if len(numeric_vals) > 1 else 0
-                            amt_before = numeric_vals[2] if len(numeric_vals) > 2 else (numeric_vals[1] if len(numeric_vals) == 2 else 0.0)
-                            amt_after = numeric_vals[3] if len(numeric_vals) > 3 else amt_before
+                        if len(context_numbers) >= 2:
+                            lives = context_numbers[0] if context_numbers[0] > 5 else default_members
+                            claims_cnt = context_numbers[1] if len(context_numbers) > 1 else 0
+                            amt_before = context_numbers[2] if len(context_numbers) > 2 else 0.0
+                            amt_after = context_numbers[3] if len(context_numbers) > 3 else amt_before
                             
                             cleaned_records.append({
                                 'session_id': str(session_id),
@@ -116,13 +119,14 @@ def parse_pdf_claims_adaptive(file_obj, session_id, default_members):
                                 'month_code': month_code,
                                 'month_weight': 1.0,
                                 'class_tier': current_tier,
-                                'active_lives': int(lives) if lives > 0 else int(default_members),
+                                'active_lives': int(lives),
                                 'claims_count': int(claims_cnt),
                                 'paid_claims_sar': float(amt_before),
                                 'paid_claims_vat_sar': float(amt_after)
                             })
+                    i += 1
     except Exception as e:
-        st.error(f"خطأ في قراءة الملف {file_obj.name}: {str(e)}")
+        st.error(f"خطأ في معالجة الملف {file_obj.name}: {str(e)}")
         
     return cleaned_records
 
@@ -131,7 +135,7 @@ def process_preview_files(uploaded_files, session_id, default_members):
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
             f.seek(0)
-            m_recs = parse_pdf_claims_adaptive(f, session_id, default_members)
+            m_recs = parse_pdf_claims_advanced(f, session_id, default_members)
             all_m.extend(m_recs)
     return pd.DataFrame(all_m), pd.DataFrame(), pd.DataFrame()
 
@@ -147,8 +151,8 @@ def upload_data_to_bigquery(df_monthly):
     job = client.load_table_from_dataframe(df_monthly, table_ref, job_config=job_config)
     job.result()
 
-st.title("مرصد المطالبات | محطة المعاينة المتكيفة")
-st.markdown("معالجة ودمج ملفات متعددة (التعاونية + ميدغلف) بمرونة تامة.")
+st.title("مرصد المطالبات | محطة المعاينة الشاملة والمتقدمة")
+st.markdown("معالجة ودمج ملفات متعددة (التعاونية + ميدغلف) بمرونة تامة واستخراج دقيق للتواريخ والترويسات.")
 
 col_date, col_members = st.columns(2)
 with col_date:
@@ -165,24 +169,29 @@ uploaded_files = st.file_uploader("رفع ملفات تجربة المطالبا
 if uploaded_files:
     session_id = f"session_{uuid.uuid4().hex[:8]}"
     
-    if st.button("معاينة البيانات المتكيفة لكافة الملفات", type="secondary"):
+    if st.button("معاينة البيانات المجمعة لكافة الملفات", type="secondary"):
         if not current_premium or not total_members or not inception_date:
             st.warning("يرجى تعبئة الحقول الأساسية.")
         else:
-            with st.spinner("جاري استخراج ومعالجة الملفات..."):
+            with st.spinner("جاري استخراج وتحليل الملفات..."):
                 df_m, _, _ = process_preview_files(uploaded_files, session_id, total_members)
                 st.session_state["preview_m"] = df_m
                 st.session_state["temp_session_id"] = session_id
-                st.success(f"تمت معالجة الملفات بنجاح واستخراج {len(df_m)} سجلاً!")
+                st.success(f"تمت معالجة الملفات بنجاح واستخراج {len(df_m)} سجلاً لمختلف المزودين!")
 
     if "preview_m" in st.session_state and not st.session_state["preview_m"].empty:
-        st.subheader("🔍 معاينة جدول الأداء المجمع (Adaptive Preview)")
+        st.subheader("🔍 معاينة جدول الأداء المجمع (Advanced Preview)")
         st.dataframe(st.session_state["preview_m"], use_container_width=True)
         
         csv_m = st.session_state["preview_m"].to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 تحميل جدول الأداء كاملًا (CSV)",
             data=csv_m,
-            file_name="adaptive_monthly_performance.csv",
+            file_name="advanced_monthly_performance.csv",
             mime="text/csv",
         )
+        
+        if st.button("اعتماد وضخ البيانات إلى BigQuery", type="primary"):
+            with st.spinner("جاري الضخ إلى المستودع..."):
+                upload_data_to_bigquery(st.session_state["preview_m"])
+                st.success("تم الضخ بنجاح وكافة الملفات أصبحت جاهزة في المنصة!")
