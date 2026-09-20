@@ -30,22 +30,6 @@ def get_bq_client():
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-EXACT_BQ_COLUMNS_MONTHLY = [
-    'session_id', 'created_at', 'policy_year', 'policy_year_label', 'month_code', 
-    'month_weight', 'class_tier', 'active_lives', 'claims_count', 
-    'paid_claims_sar', 'paid_claims_vat_sar'
-]
-
-EXACT_BQ_COLUMNS_BENEFITS = [
-    'session_id', 'created_at', 'policy_year', 'policy_year_label', 'class_tier', 
-    'benefit_name', 'claims_count', 'paid_claims_sar', 'paid_claims_vat_sar'
-]
-
-EXACT_BQ_COLUMNS_PROVIDERS = [
-    'session_id', 'created_at', 'policy_year', 'policy_year_label', 'class_tier', 
-    'provider_name', 'claims_count', 'paid_claims_sar', 'paid_claims_vat_sar'
-]
-
 def safe_clean_number(val):
     if pd.isna(val) or val is None:
         return 0.0
@@ -56,7 +40,7 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# دالة استخراج مرنة ومرتكزة على البحث بالمفاتيح لتفادي اختلاف هيكلة الشركات (التعاونية وميدغلف)
+# دالة استخراج الأداء الشهري مع الحفاظ على كافة الحقول
 def parse_pdf_claims_flexible(file_obj, session_id, default_members):
     file_obj.seek(0)
     cleaned_records = []
@@ -81,7 +65,6 @@ def parse_pdf_claims_flexible(file_obj, session_id, default_members):
                 if not line_clean or any(kw in line_clean.lower() for kw in ['report date', 'total', 'subtotal', 'period', 'limit', 'classification', 'policy holder']):
                     continue
                 
-                # البحث عن أنماط الشهور بصيغة MM/YYYY أو MM-YYYY
                 date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line_clean)
                 if date_match:
                     month_num = date_match.group(1).zfill(2)
@@ -95,7 +78,6 @@ def parse_pdf_claims_flexible(file_obj, session_id, default_members):
                         if t != date_match.group(0) and t != year_num:
                             numeric_vals.append(cleaned_val)
                     
-                    # استخراج الأعمدة بمرونة تامة لضمان عدم انقلاب الأرقام
                     if len(numeric_vals) >= 3:
                         if len(numeric_vals) >= 5 and numeric_vals[0] in list(range(1, 32)):
                             lives = numeric_vals[1]
@@ -124,6 +106,7 @@ def parse_pdf_claims_flexible(file_obj, session_id, default_members):
                             })
     return cleaned_records
 
+# دالة استخراج تفاصيل المنافع
 def parse_pdf_benefits(file_obj, session_id):
     file_obj.seek(0)
     benefit_records = []
@@ -172,6 +155,7 @@ def parse_pdf_benefits(file_obj, session_id):
                         })
     return benefit_records
 
+# دالة استخراج مقدمي الخدمة
 def parse_pdf_providers(file_obj, session_id):
     file_obj.seek(0)
     provider_records = []
@@ -264,7 +248,7 @@ def delete_session_data(target_session_id):
 i18n = {
     "AR": {
         "title": "مرصد المطالبات | محطة المعاينة التجريبية",
-        "subtitle": "قم برفع ملفات PDF (التعاونية أو ميدغلف) لمعاينة دقة الأعمدة قبل الضخ النهائي.",
+        "subtitle": "قم برفع ملفات PDF (التعاونية أو ميدغلف) لمعاينة دقة الأعمدة وتحميلها قبل الضخ النهائي.",
         "date_label": "تاريخ بداية سريان الوثيقة",
         "prem_label": "قسط الوثيقة السنوي الحالي (SAR)",
         "members_label": "إجمالي عدد المؤمن عليهم (Lives)",
@@ -317,11 +301,34 @@ if uploaded_files:
         st.subheader("🔍 معاينة جدول الأداء الشهري (Monthly Performance Preview)")
         st.dataframe(st.session_state["preview_m"], use_container_width=True)
         
+        # أزرار تحميل البيانات بصيغة CSV للعمل عليها وتطوير المنطق
+        csv_m = st.session_state["preview_m"].to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 تحميل جدول الأداء الشهري كاملًا (CSV)",
+            data=csv_m,
+            file_name="monthly_performance_preview.csv",
+            mime="text/csv",
+        )
+        
         st.subheader("🔍 معاينة جدول المنافع (Benefits Breakdown Preview)")
         st.dataframe(st.session_state["preview_b"], use_container_width=True)
+        csv_b = st.session_state["preview_b"].to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 تحميل جدول المنافع كاملًا (CSV)",
+            data=csv_b,
+            file_name="benefits_breakdown_preview.csv",
+            mime="text/csv",
+        )
 
         st.subheader("🔍 معاينة جدول مقدمي الخدمة (Top Providers Preview)")
         st.dataframe(st.session_state["preview_p"], use_container_width=True)
+        csv_p = st.session_state["preview_p"].to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 تحميل جدول مقدمي الخدمة كاملًا (CSV)",
+            data=csv_p,
+            file_name="top_providers_preview.csv",
+            mime="text/csv",
+        )
 
         if st.button(t["btn_push"], type="primary"):
             with st.spinner("جاري الضخ إلى المستودع..."):
