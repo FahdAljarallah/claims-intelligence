@@ -56,8 +56,8 @@ def extract_file_inception_date(file_obj):
         pass
     return "Not Specified"
 
-# محرك استخراج متطور يدعم التنسيقات المتفرقة (ميدغلف والتعاونية)
-def parse_pdf_claims_advanced(file_obj, session_id, default_members):
+# محرك استخراج متطور يلتقط ترويسة السنة الداخلية لكل جدول بمرونة تامة
+def parse_pdf_claims_dynamic(file_obj, session_id, default_members):
     file_obj.seek(0)
     file_inception = extract_file_inception_date(file_obj)
     cleaned_records = []
@@ -65,7 +65,7 @@ def parse_pdf_claims_advanced(file_obj, session_id, default_members):
     try:
         with pdfplumber.open(file_obj) as pdf:
             current_tier = "CLASS VIP"
-            current_table_header = "Default Period"
+            current_policy_section = "Last Policy Year"  # القيمة الافتراضية للترويسة الداخلية
             
             for page in pdf.pages:
                 page_text = page.extract_text()
@@ -78,8 +78,11 @@ def parse_pdf_claims_advanced(file_obj, session_id, default_members):
                     line = lines[i]
                     l_low = line.lower()
                     
-                    if any(kw in l_low for kw in ["policy year", "period", "breakdown", "experience", "classification", "last policy year"]):
-                        current_table_header = line
+                    # التقاط ترويسة السنة أو الفترة الداخلية بدقة (مثل Last Policy Year أو Prior Policy Year)
+                    if any(kw in l_low for kw in ["last policy year", "prior policy year", "policy year-2", "policy year"]):
+                        if len(line) < 45:  # ضمان أن السطر عبارة عن عنوان وليس فقرة نصية طويلة
+                            current_policy_section = line
+                            
                     if "class type" in l_low or "class" in l_low:
                         if "vip1" in l_low or "class 1" in l_low:
                             current_tier = "CLASS VIP1"
@@ -94,7 +97,6 @@ def parse_pdf_claims_advanced(file_obj, session_id, default_members):
                         else:
                             month_code = f"{date_match.group(4)}-{date_match.group(3).zfill(2)}"
                         
-                        # تجميع الأرقام السياقية من الأسطر القريبة لتجنب مشكلة تفرّق الأعمدة في ميدغلف
                         context_numbers = []
                         for j in range(i, min(i + 8, len(lines))):
                             potential_nums = re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', lines[j])
@@ -113,8 +115,8 @@ def parse_pdf_claims_advanced(file_obj, session_id, default_members):
                                 'session_id': str(session_id),
                                 'created_at': pd.Timestamp.now(tz='UTC'),
                                 'policy_year': 'RAW_TEST',
-                                'policy_year_label': file_obj.name,
-                                'table_header': current_table_header,
+                                'policy_year_label': current_policy_section, # هنا تم ربط الحقل بالترويسة الداخلية الحية للجدول
+                                'source_file': file_obj.name,                 # اسم الملف الفعلي محتفظ به هنا للاستقلالية
                                 'policy_inception_date': file_inception,
                                 'month_code': month_code,
                                 'month_weight': 1.0,
@@ -135,7 +137,7 @@ def process_preview_files(uploaded_files, session_id, default_members):
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
             f.seek(0)
-            m_recs = parse_pdf_claims_advanced(f, session_id, default_members)
+            m_recs = parse_pdf_claims_dynamic(f, session_id, default_members)
             all_m.extend(m_recs)
     return pd.DataFrame(all_m), pd.DataFrame(), pd.DataFrame()
 
@@ -151,8 +153,8 @@ def upload_data_to_bigquery(df_monthly):
     job = client.load_table_from_dataframe(df_monthly, table_ref, job_config=job_config)
     job.result()
 
-st.title("مرصد المطالبات | محطة المعاينة الشاملة والمتقدمة")
-st.markdown("معالجة ودمج ملفات متعددة (التعاونية + ميدغلف) بمرونة تامة واستخراج دقيق للتواريخ والترويسات.")
+st.title("مرصد المطالبات | محطة العزل الزمني للترويسات")
+st.markdown("استخراج ترويسات سنوات البوليصة الداخلية ديناميكياً لكل جدول وتوزيعها على البيانات بدقة.")
 
 col_date, col_members = st.columns(2)
 with col_date:
@@ -169,29 +171,29 @@ uploaded_files = st.file_uploader("رفع ملفات تجربة المطالبا
 if uploaded_files:
     session_id = f"session_{uuid.uuid4().hex[:8]}"
     
-    if st.button("معاينة البيانات المجمعة لكافة الملفات", type="secondary"):
+    if st.button("معاينة ترويسات وقيم البيانات", type="secondary"):
         if not current_premium or not total_members or not inception_date:
             st.warning("يرجى تعبئة الحقول الأساسية.")
         else:
-            with st.spinner("جاري استخراج وتحليل الملفات..."):
+            with st.spinner("جاري استخراج وتحليل ترويسات الجداول..."):
                 df_m, _, _ = process_preview_files(uploaded_files, session_id, total_members)
                 st.session_state["preview_m"] = df_m
                 st.session_state["temp_session_id"] = session_id
-                st.success(f"تمت معالجة الملفات بنجاح واستخراج {len(df_m)} سجلاً لمختلف المزودين!")
+                st.success(f"تمت معالجة المستندات واستخراج {len(df_m)} سجلاً موزعة على ترويساتها الحية!")
 
     if "preview_m" in st.session_state and not st.session_state["preview_m"].empty:
-        st.subheader("🔍 معاينة جدول الأداء المجمع (Advanced Preview)")
+        st.subheader("🔍 معاينة جدول الأداء مع الترويسات الديناميكية (Dynamic Headers Preview)")
         st.dataframe(st.session_state["preview_m"], use_container_width=True)
         
         csv_m = st.session_state["preview_m"].to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 تحميل جدول الأداء كاملًا (CSV)",
+            label="📥 تحميل جدول الأداء بالترويسات كاملًا (CSV)",
             data=csv_m,
-            file_name="advanced_monthly_performance.csv",
+            file_name="dynamic_policy_performance.csv",
             mime="text/csv",
         )
         
         if st.button("اعتماد وضخ البيانات إلى BigQuery", type="primary"):
             with st.spinner("جاري الضخ إلى المستودع..."):
                 upload_data_to_bigquery(st.session_state["preview_m"])
-                st.success("تم الضخ بنجاح وكافة الملفات أصبحت جاهزة في المنصة!")
+                st.success("تم الضخ بنجاح وأصبحت الترويسات جاهزة في المنصة!")
