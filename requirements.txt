@@ -5,6 +5,7 @@ pdfplumber>=0.11.0
 gspread>=6.0.0
 google-auth>=2.25.0
 google-cloud-bigquery>=3.14.0
+google-cloud-documentai>=2.20.0
 plotly>=5.18.0
 opencv-python-headless
 pytesseract
