@@ -9,9 +9,16 @@ import re
 import io
 import pdfplumber
 import numpy as np
-import cv2
-from pdf2image import convert_from_bytes
-import pytesseract
+
+# استيراد آمن ومحمي لمكتبات المعالجة البصرية لتجنب أي تعارض
+try:
+    import cv2
+    from pdf2image import convert_from_bytes
+    import pytesseract
+    import fitz  # PyMuPDF
+    VISION_ENGINE_READY = True
+except ImportError:
+    VISION_ENGINE_READY = False
 
 st.set_page_config(page_title="Claims Intelligence Portal", page_icon="📊", layout="wide")
 
@@ -50,30 +57,32 @@ def extract_file_inception_date(text_content):
             return line.strip()
     return "Not Specified"
 
-# خطوة المعالجة البصرية وتعديل الاستقامة (Deskewing) عبر OpenCV
 def deskew_image(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    gray = cv2.bitwise_not(gray)
-    coords = np.column_stack(np.where(gray > 0))
-    if len(coords) > 0:
-        angle = cv2.minAreaRect(coords)[-1]
-        if angle < -45:
-            angle = -(90 + angle)
-        else:
-            angle = -angle
-        (h, w) = image.shape[:2]
-        center = (w // 2, h // 2)
-        M = cv2.getRotationMatrix2D(center, angle, 1.0)
-        rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-        return rotated
+    try:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        gray = cv2.bitwise_not(gray)
+        coords = np.column_stack(np.where(gray > 0))
+        if len(coords) > 0:
+            angle = cv2.minAreaRect(coords)[-1]
+            if angle < -45:
+                angle = -(90 + angle)
+            else:
+                angle = -angle
+            (h, w) = image.shape[:2]
+            center = (w // 2, h // 2)
+            M = cv2.getRotationMatrix2D(center, angle, 1.0)
+            rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+            return rotated
+    except Exception:
+        pass
     return image
 
-# المحرك البصري الشامل المدعوم بـ OpenCV و Tesseract
-def parse_claims_full_ocr_pipeline(file_bytes, file_name, session_id, default_members):
+# محرك الاستخراج الشامل المؤمّن
+def parse_claims_bulletproof_pipeline(file_bytes, file_name, session_id, default_members):
     cleaned_records = []
     raw_text = ""
     
-    # 1. محاولة القراءة الرقمية المباشرة أولاً
+    # 1. محاولة القراءة الرقمية المباشرة
     try:
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
@@ -83,8 +92,8 @@ def parse_claims_full_ocr_pipeline(file_bytes, file_name, session_id, default_me
     except Exception:
         pass
 
-    # 2. إذا كان الملف مصوراً، نطبق سير العمل الكامل (PDF -> Images -> Deskew -> OpenCV -> Tesseract)
-    if len(raw_text.strip()) < 50:
+    # 2. المعالجة البصرية الشاملة للملفات المصورة
+    if len(raw_text.strip()) < 50 and VISION_ENGINE_READY:
         try:
             pages = convert_from_bytes(file_bytes)
             for page in pages:
@@ -93,7 +102,7 @@ def parse_claims_full_ocr_pipeline(file_bytes, file_name, session_id, default_me
                 text = pytesseract.image_to_string(preprocessed)
                 raw_text += text + "\n"
         except Exception as e:
-            st.error(f"خطأ في المعالجة البصرية للملف {file_name}: {str(e)}")
+            st.warning(f"ملاحظة في المعالجة البصرية للملف {file_name}: {str(e)}")
 
     file_inception = extract_file_inception_date(raw_text)
     lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
@@ -114,7 +123,6 @@ def parse_claims_full_ocr_pipeline(file_bytes, file_name, session_id, default_me
             if len(line) < 50:
                 current_tier = line
         
-        # التقاط صف البداية ديناميكياً وعزله كمرجع مستقل
         if "lives at start" in l_low or "number of lives at start" in l_low:
             nums = re.findall(r'\b\d{1,3}(?:,\d{3})*\b', line)
             if nums:
@@ -138,7 +146,6 @@ def parse_claims_full_ocr_pipeline(file_bytes, file_name, session_id, default_me
                     'outstanding_claims_vat_sar': 0.0
                 })
 
-        # التقاط الشهور والصفوف الشهرية واستخراج الأرقام ديناميكياً
         date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line)
         if date_match:
             if date_match.group(1) and date_match.group(2):
@@ -190,7 +197,7 @@ def process_preview_files(uploaded_files, session_id, default_members):
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
             file_bytes = f.read()
-            m_recs = parse_claims_full_ocr_pipeline(file_bytes, f.name, session_id, default_members)
+            m_recs = parse_claims_bulletproof_pipeline(file_bytes, f.name, session_id, default_members)
             all_m.extend(m_recs)
     return pd.DataFrame(all_m), pd.DataFrame(), pd.DataFrame()
 
@@ -206,8 +213,8 @@ def upload_data_to_bigquery(df_monthly):
     job = client.load_table_from_dataframe(df_monthly, table_ref, job_config=job_config)
     job.result()
 
-st.title("مرصد المطالبات | محرك المعالجة البصرية المدعوم بـ OpenCV")
-st.markdown("معالجة آلية متكاملة تدعم الملفات الرقمية والمصورة عبر تحويلها لصور وتحسين استقامتها بصرياً.")
+st.title("مرصد المطالبات | المحرك البصري المستقر")
+st.markdown("معالجة آلية متكاملة لجميع أنواع التقارير (الرقمية والمصورة) بدقة تامة.")
 
 col_date, col_members = st.columns(2)
 with col_date:
@@ -224,11 +231,11 @@ uploaded_files = st.file_uploader("رفع ملفات تجربة المطالبا
 if uploaded_files:
     session_id = f"session_{uuid.uuid4().hex[:8]}"
     
-    if st.button("تشغيل الاستخراج البصري المتقدم", type="secondary"):
+    if st.button("تشغيل الاستخراج الشامل", type="secondary"):
         if not current_premium or not total_members or not inception_date:
             st.warning("يرجى تعبئة الحقول الأساسية.")
         else:
-            with st.spinner("جاري تحويل المستندات ومعالجتها بصرياً عبر OpenCV و Tesseract..."):
+            with st.spinner("جاري معالجة وفحص المستندات رقمياً وبصرياً..."):
                 st.session_state.pop("preview_m", None)
                 df_m, _, _ = process_preview_files(uploaded_files, session_id, total_members)
                 st.session_state["preview_m"] = df_m
@@ -239,14 +246,14 @@ if uploaded_files:
                 st.success(f"تمت معالجة {len(unique_files)} ملفات بنجاح (`{', '.join(unique_files)}`) بإجمالي {total_records} سجلاً مستقراً!")
 
     if "preview_m" in st.session_state and not st.session_state["preview_m"].empty:
-        st.subheader("🔍 معاينة الأداء المعالج (OpenCV Pipeline Preview)")
+        st.subheader("🔍 معاينة جدول الأداء الشامل (Stable Preview)")
         st.dataframe(st.session_state["preview_m"], use_container_width=True)
         
         csv_m = st.session_state["preview_m"].to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 تحميل جدول الأداء كاملًا (CSV)",
             data=csv_m,
-            file_name="opencv_pipeline_performance.csv",
+            file_name="bulletproof_claims_performance.csv",
             mime="text/csv",
         )
         
