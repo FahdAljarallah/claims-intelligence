@@ -8,15 +8,15 @@ import time
 import re
 import io
 import pdfplumber
-import numpy as np
 
-# تفعيل المكتبات البصرية للاستخراج الشامل (OCR)
+# تفعيل محركات المعالجة المحلية للصور والملفات المصورة
 try:
-    from pdf2image import convert_from_bytes
+    import fitz  # PyMuPDF لقراءة وتحويل صفحات الملفات المصورة
     import pytesseract
-    OCR_ENGINE_AVAILABLE = True
+    from PIL import Image
+    LOCAL_OCR_READY = True
 except ImportError:
-    OCR_ENGINE_AVAILABLE = False
+    LOCAL_OCR_READY = False
 
 st.set_page_config(page_title="Claims Intelligence Portal", page_icon="📊", layout="wide")
 
@@ -55,33 +55,35 @@ def extract_file_inception_date(text_content):
             return line.strip()
     return "Not Specified"
 
-# المحرك الشامل الموحد (يعالج الملفات الرقمية والمصورة آلياً 100%)
-def parse_claims_universal_engine(file_bytes, file_name, session_id, default_members):
+# المحرك الشامل المتقدم (يقرأ الملفات الرقمية والمصورة محلياً 100%)
+def parse_claims_universal_robust(file_bytes, file_name, session_id, default_members):
     cleaned_records = []
-    raw_text = ""
+    extracted_text = ""
     
-    # الخطوة 1: محاولة قراءة النص مباشرة إذا كان الملف رقمياً (Digital PDF)
+    # الخطوة الأولى: محاولة الاستخراج المباشر عبر pdfplumber
     try:
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
                 t = page.extract_text()
                 if t:
-                    raw_text += t + "\n"
+                    extracted_text += t + "\n"
     except Exception:
         pass
 
-    # الخطوة 2: إذا كان النص فارغاً أو قليلاً (يعني أن الملف مصور Scanned PDF)، نفعل الـ OCR الشامل
-    if len(raw_text.strip()) < 50 and OCR_ENGINE_AVAILABLE:
+    # الخطوة الثانية: إذا كان الملف مصوراً (Scanned)، يتم تفعيل الفحص البصري المحلي عبر PyMuPDF و Tesseract
+    if len(extracted_text.strip()) < 50 and LOCAL_OCR_READY:
         try:
-            images = convert_from_bytes(file_bytes)
-            for img in images:
-                ocr_output = pytesseract.image_to_string(img)
-                raw_text += ocr_output + "\n"
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            for page in doc:
+                pix = page.get_pixmap(dpi=200)
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+                ocr_text = pytesseract.image_to_string(img)
+                extracted_text += ocr_text + "\n"
         except Exception as e:
-            st.warning(f"تعذر تشغيل المعالجة البصرية للملف {file_name}: {str(e)}")
+            st.warning(f"ملاحظة في المعالجة البصرية للملف {file_name}: {str(e)}")
 
-    file_inception = extract_file_inception_date(raw_text)
-    lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
+    file_inception = extract_file_inception_date(extracted_text)
+    lines = [l.strip() for l in extracted_text.split('\n') if l.strip()]
     
     current_tier = "GENERAL CLASS"
     current_policy_section = "Last Policy Year"
@@ -175,7 +177,7 @@ def process_preview_files(uploaded_files, session_id, default_members):
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
             file_bytes = f.read()
-            m_recs = parse_claims_universal_engine(file_bytes, f.name, session_id, default_members)
+            m_recs = parse_claims_universal_robust(file_bytes, f.name, session_id, default_members)
             all_m.extend(m_recs)
     return pd.DataFrame(all_m), pd.DataFrame(), pd.DataFrame()
 
@@ -191,8 +193,8 @@ def upload_data_to_bigquery(df_monthly):
     job = client.load_table_from_dataframe(df_monthly, table_ref, job_config=job_config)
     job.result()
 
-st.title("مرصد المطالبات | المحرك الشامل للـ PDF (الرقمي والمصور)")
-st.markdown("معالجة آلية متكاملة 100% تتعرف تلقائياً على نوع المستند وتستخرج بياناته دون تدخل بشري.")
+st.title("مرصد المطالبات | المحرك الشامل المتقدم")
+st.markdown("دعم كامل لكافة أنواع الملفات (الرقمية والمصورة) محلياً بالكامل دون أي خدمات مدفوعة.")
 
 col_date, col_members = st.columns(2)
 with col_date:
@@ -209,11 +211,11 @@ uploaded_files = st.file_uploader("رفع ملفات تجربة المطالبا
 if uploaded_files:
     session_id = f"session_{uuid.uuid4().hex[:8]}"
     
-    if st.button("تشغيل الاستخراج الشامل الآلي", type="secondary"):
+    if st.button("تشغيل الاستخراج الشامل المتقدم", type="secondary"):
         if not current_premium or not total_members or not inception_date:
             st.warning("يرجى تعبئة الحقول الأساسية.")
         else:
-            with st.spinner("جاري فحص المستندات ومعالجتها رقمياً أو بصرياً آلياً..."):
+            with st.spinner("جاري فحص المستندات ومعالجتها آلياً (رقمياً وبصرياً)..."):
                 st.session_state.pop("preview_m", None)
                 df_m, _, _ = process_preview_files(uploaded_files, session_id, total_members)
                 st.session_state["preview_m"] = df_m
@@ -224,18 +226,18 @@ if uploaded_files:
                 st.success(f"تمت معالجة {len(unique_files)} ملفات بنجاح (`{', '.join(unique_files)}`) بإجمالي {total_records} سجلاً موحداً!")
 
     if "preview_m" in st.session_state and not st.session_state["preview_m"].empty:
-        st.subheader("🔍 معاينة جدول الأداء الشامل (Universal Preview)")
+        st.subheader("🔍 معاينة جدول الأداء الشامل (Universal Robust Preview)")
         st.dataframe(st.session_state["preview_m"], use_container_width=True)
         
         csv_m = st.session_state["preview_m"].to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 تحميل جدول الأداء كاملًا (CSV)",
             data=csv_m,
-            file_name="universal_claims_performance.csv",
+            file_name="universal_robust_performance.csv",
             mime="text/csv",
         )
         
-        if st.button("اعتماد وضخ البيانات إلى BigQuery", type="primary"):
+        if st.button("اعتماد وضخ البيانات الشاملة إلى BigQuery", type="primary"):
             with st.spinner("جاري الضخ إلى المستودع..."):
                 upload_data_to_bigquery(st.session_state["preview_m"])
                 st.success("تم ضخ البيانات بنجاح إلى BigQuery وأصبحت جاهزة لإنشاء لوحة القيادة ومؤشرات التفاوض!")
