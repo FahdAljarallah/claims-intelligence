@@ -6,6 +6,7 @@ import json
 import urllib.parse
 import time
 import re
+import io  # المكتبة المسؤولة عن معالجة تدفقات الملفات الثنائية
 import pdfplumber
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
@@ -15,7 +16,6 @@ try:
     import fitz  # PyMuPDF
     import pytesseract
     from PIL import Image
-    import io
     OCR_AVAILABLE = True
 except ImportError:
     OCR_AVAILABLE = False
@@ -74,7 +74,6 @@ def extract_file_inception_date(file_bytes, file_name):
         pass
     return "Not Specified"
 
-# المحرك الشامل المدمج (يدعم النصوص المباشرة والـ OCR لقراءة كافة الفئات والسجلات)
 def parse_pdf_claims_full_ocr(file_bytes, file_name, session_id, default_members):
     file_inception = extract_file_inception_date(file_bytes, file_name)
     cleaned_records = []
@@ -87,7 +86,6 @@ def parse_pdf_claims_full_ocr(file_bytes, file_name, session_id, default_members
                 if t:
                     full_text += t + "\n"
                     
-        # إذا كان النص قليلاً جداً أو فارغاً، يتم تفعيل PyMuPDF + Tesseract OCR بالكامل
         if len(full_text.strip()) < 100 and OCR_AVAILABLE:
             doc = fitz.open(stream=file_bytes, filetype="pdf")
             for page in doc:
@@ -114,7 +112,6 @@ def parse_pdf_claims_full_ocr(file_bytes, file_name, session_id, default_members
                 elif "vip" in l_low:
                     current_tier = line[:35]
             
-            # التقاط أنماط الأشهر بمرونة تامة (MM/YYYY أو YYYY-MM)
             date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line)
             if date_match:
                 if date_match.group(1) and date_match.group(2):
