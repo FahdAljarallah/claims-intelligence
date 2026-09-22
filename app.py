@@ -41,146 +41,30 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# محرك الاستخراج الدقيق والمصحح للملفات المباشرة والعادية مع عزل صف البداية
-def parse_pdf_claims_accurate_parser(file_bytes, file_name, session_id, default_members):
-    cleaned_records = []
-    file_inception = "Inception 30/11/2025" if "ce" in file_name.lower() else "Inception 01-12-2024"
-    
-    if "ce" in file_name.lower():
-        medgulf_exact_data = {
-            "CLASS VIP": [
-                (303, 1, 2310.00, 2310.00, 0, 0.0, 0.0),
-                (306, 474, 437604.62, 482675.41, 0, 0.0, 0.0),
-                (320, 456, 292830.62, 320363.34, 0, 0.0, 0.0),
-                (327, 440, 291365.44, 317990.41, 0, 0.0, 0.0),
-                (331, 506, 408401.69, 446023.44, 0, 0.0, 0.0),
-                (331, 551, 564451.06, 617910.19, 0, 0.0, 0.0),
-                (344, 511, 473800.62, 524371.06, 0, 0.0, 0.0),
-                (345, 501, 500165.75, 552348.00, 0, 0.0, 0.0),
-                (346, 411, 334533.94, 372220.53, 175, 216721.0, 237650.81),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-            ],
-            "CLASS VIP - Divorced Female": [
-                (2, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (2, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (2, 1, 170.00, 184.54, 0, 0.0, 0.0),
-                (2, 3, 2952.05, 3298.84, 0, 0.0, 0.0),
-                (2, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (2, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (2, 1, 345.00, 388.99, 0, 0.0, 0.0),
-                (2, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (2, 1, 195.50, 212.22, 1, 2450.0, 2450.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-            ],
-            "CLASS VIP - Single Female": [
-                (32, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (32, 59, 58274.86, 65500.40, 0, 0.0, 0.0),
-                (32, 59, 38279.43, 41936.86, 0, 0.0, 0.0),
-                (34, 53, 24934.85, 27729.76, 0, 0.0, 0.0),
-                (36, 34, 21258.41, 23489.88, 0, 0.0, 0.0),
-                (33, 66, 41263.62, 45542.07, 0, 0.0, 0.0),
-                (34, 48, 52250.95, 57097.82, 0, 0.0, 0.0),
-                (35, 63, 48903.54, 54014.22, 0, 0.0, 0.0),
-                (37, 49, 44283.93, 48761.50, 27, 39636.86, 44118.91),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-            ],
-            "CLASS VIP1": [
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (16, 5, 729.07, 801.24, 0, 0.0, 0.0),
-                (21, 23, 8514.29, 9475.44, 0, 0.0, 0.0),
-                (28, 22, 15541.95, 17408.75, 0, 0.0, 0.0),
-                (29, 43, 24105.40, 26361.34, 0, 0.0, 0.0),
-                (39, 35, 21515.84, 23888.81, 0, 0.0, 0.0),
-                (41, 58, 29750.30, 32453.72, 0, 0.0, 0.0),
-                (41, 48, 29982.27, 26928.49, 0, 0.0, 0.0),
-                (79, 89, 55360.89, 61553.16, 30, 19984.87, 18078.32),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-            ],
-            "CLASS VIP1 - Single": [
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (2, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (2, 9, 3605.59, 3882.22, 0, 0.0, 0.0),
-                (1, 6, 2109.58, 2338.29, 0, 0.0, 0.0),
-                (5, 4, 1466.31, 1561.01, 0, 0.0, 0.0),
-                (7, 6, 3787.58, 4185.68, 0, 0.0, 0.0),
-                (9, 19, 15142.07, 16560.63, 0, 0.0, 0.0),
-                (9, 12, 7737.89, 8512.89, 0, 0.0, 0.0),
-                (13, 11, 7030.75, 7790.92, 3, 1949.0, 2020.08),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-                (0, 0, 0.0, 0.0, 0, 0.0, 0.0),
-            ]
-        }
-        
-        start_lives_per_class = {
-            "CLASS VIP": 336,
-            "CLASS VIP - Divorced Female": 2,
-            "CLASS VIP - Single Female": 32,
-            "CLASS VIP1": 0,
-            "CLASS VIP1 - Single": 0
-        }
-        
-        for cls_name, start_lives in start_lives_per_class.items():
-            cleaned_records.append({
-                'session_id': str(session_id),
-                'created_at': pd.Timestamp.now(tz='UTC'),
-                'policy_year': 'RAW_TEST',
-                'policy_year_label': 'Policy Start Reference',
-                'source_file': file_name,
-                'policy_inception_date': file_inception,
-                'month_code': 'START_LIVES',
-                'month_weight': 0.0,
-                'class_tier': cls_name,
-                'active_lives': float(start_lives),
-                'claims_count': 0.0,
-                'paid_claims_sar': 0.0,
-                'paid_claims_vat_sar': 0.0,
-                'outstanding_claims_count': 0.0,
-                'outstanding_claims_sar': 0.0,
-                'outstanding_claims_vat_sar': 0.0
-            })
-
-        months = ["2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11"]
-        for cls_name, rows in medgulf_exact_data.items():
-            for m_idx, m_code in enumerate(months):
-                r = rows[m_idx]
-                cleaned_records.append({
-                    'session_id': str(session_id),
-                    'created_at': pd.Timestamp.now(tz='UTC'),
-                    'policy_year': 'RAW_TEST',
-                    'policy_year_label': 'Last Policy Year',
-                    'source_file': file_name,
-                    'policy_inception_date': file_inception,
-                    'month_code': m_code,
-                    'month_weight': 1.0,
-                    'class_tier': cls_name,
-                    'active_lives': float(r[0]),
-                    'claims_count': float(r[1]),
-                    'paid_claims_sar': float(r[2]),
-                    'paid_claims_vat_sar': float(r[3]),
-                    'outstanding_claims_count': float(r[4]),
-                    'outstanding_claims_sar': float(r[5]),
-                    'outstanding_claims_vat_sar': float(r[6])
-                })
-        return cleaned_records
-
-    # المعالجة المباشرة والمصححة لملفات الـ PDF العادية (التعاونية) مع فلترة الأعمدة وعزل صف البداية بدقة
+def extract_file_inception_date(file_bytes):
+    text = ""
     try:
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-            current_tier = "CLASS VIP"
+            for page in pdf.pages[:2]:
+                t = page.extract_text()
+                if t:
+                    text += t + "\n"
+        for line in text.split('\n'):
+            l_low = line.lower()
+            if any(kw in l_low for kw in ["inception", "effective", "period from", "from date", "processed to", "policy period"]):
+                return line.strip()
+    except Exception:
+        pass
+    return "Not Specified"
+
+# محرك ديناميكي نقي 100% يقرأ الملف المرفوع حصرياً دون أي تداخل أو قيم مسبقة
+def parse_pdf_claims_dynamic_pure(file_bytes, file_name, session_id, default_members):
+    cleaned_records = []
+    file_inception = extract_file_inception_date(file_bytes)
+    
+    try:
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            current_tier = "GENERAL CLASS"
             current_policy_section = "Last Policy Year"
             
             for page in pdf.pages:
@@ -198,11 +82,12 @@ def parse_pdf_claims_accurate_parser(file_bytes, file_name, session_id, default_
                         if len(line) < 45:
                             current_policy_section = line
                             
-                    if "class" in l_low:
-                        current_tier = line[:35]
-                    
-                    # التقاط دقيق لصف البداية وعزله بـ START_LIVES
-                    if "lives at start" in l_low or "number of lives at start" in l_low or "lives at start" in l_low:
+                    if "class" in l_low or "vip" in l_low:
+                        if len(line) < 50:
+                            current_tier = line
+                            
+                    # عزل صف البداية (Lives at start) ديناميكياً لكل ملف على حدة
+                    if "lives at start" in l_low or "number of lives at start" in l_low:
                         nums = re.findall(r'\b\d{1,3}(?:,\d{3})*\b', line)
                         if nums:
                             start_lives_val = safe_clean_number(nums[0])
@@ -225,7 +110,7 @@ def parse_pdf_claims_accurate_parser(file_bytes, file_name, session_id, default_
                                 'outstanding_claims_vat_sar': 0.0
                             })
                     
-                    # قراءة متسلسلة الأسطر الشهرية وتصحيح انزياح الأعمدة
+                    # استخراج الصفوف الشهرية الحقيقية وتصحيح أعمدة الجدول مباشرة
                     date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line)
                     if date_match:
                         if date_match.group(1) and date_match.group(2):
@@ -276,10 +161,11 @@ def parse_pdf_claims_accurate_parser(file_bytes, file_name, session_id, default_
 
 def process_preview_files(uploaded_files, session_id, default_members):
     all_m = []
+    # مسح الذاكرة المؤقتة تماماً لضمان عدم تداخل الملفات نهائياً
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
             file_bytes = f.read()
-            m_recs = parse_pdf_claims_accurate_parser(file_bytes, f.name, session_id, default_members)
+            m_recs = parse_pdf_claims_dynamic_pure(file_bytes, f.name, session_id, default_members)
             all_m.extend(m_recs)
     return pd.DataFrame(all_m), pd.DataFrame(), pd.DataFrame()
 
@@ -295,8 +181,8 @@ def upload_data_to_bigquery(df_monthly):
     job = client.load_table_from_dataframe(df_monthly, table_ref, job_config=job_config)
     job.result()
 
-st.title("مرصد المطالبات | المحرك المتسلسل المصحح")
-st.markdown("استخراج مباشر ونقي لتقارير المزودين مع تصحيح انزياح الأعمدة وعزل صف البداية بدقة تامة.")
+st.title("مرصد المطالبات | المحرك الديناميكي النقي المعزول")
+st.markdown("استخراج مستقل تماماً لكل ملف مرفوع بمعزل تام ودون أي تداخل أو قيم مسبقة.")
 
 col_date, col_members = st.columns(2)
 with col_date:
@@ -313,32 +199,34 @@ uploaded_files = st.file_uploader("رفع ملفات تجربة المطالبا
 if uploaded_files:
     session_id = f"session_{uuid.uuid4().hex[:8]}"
     
-    if st.button("معاينة واستخراج كافة الملفات بدقة مصححة", type="secondary"):
+    if st.button("معاينة واستخراج الملفات المحددة فقط", type="secondary"):
         if not current_premium or not total_members or not inception_date:
             st.warning("يرجى تعبئة الحقول الأساسية.")
         else:
-            with st.spinner("جاري استخراج وتصحيح أعمدة الملفات بدقة تامة..."):
+            with st.spinner("جاري استخراج الملفات بعزل تام وبدون تداخل..."):
+                # تصفير استاتيكي للـ session لضمان عدم تراكم النتائج القديمة
+                st.session_state.pop("preview_m", None)
                 df_m, _, _ = process_preview_files(uploaded_files, session_id, total_members)
                 st.session_state["preview_m"] = df_m
                 st.session_state["temp_session_id"] = session_id
                 
                 unique_files = df_m['source_file'].unique() if not df_m.empty else []
                 total_records = len(df_m)
-                st.success(f"تمت معالجة {len(unique_files)} ملفات بنجاح (`{', '.join(unique_files)}`) بإجمالي {total_records} سجلاً مصححاً ومنظماً!")
+                st.success(f"تمت معالجة {len(unique_files)} ملفات بنجاح (`{', '.join(unique_files)}`) بإجمالي {total_records} سجلاً مستقلاً!")
 
     if "preview_m" in st.session_state and not st.session_state["preview_m"].empty:
-        st.subheader("🔍 معاينة جدول الأداء المصحح (Corrected Parser Preview)")
+        st.subheader("🔍 معاينة جدول الأداء المعزول (Isolated Preview)")
         st.dataframe(st.session_state["preview_m"], use_container_width=True)
         
         csv_m = st.session_state["preview_m"].to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 تحميل جدول الأداء المصحح كاملًا (CSV)",
+            label="📥 تحميل جدول الأداء المستقل كاملًا (CSV)",
             data=csv_m,
-            file_name="corrected_suppliers_performance.csv",
+            file_name="isolated_suppliers_performance.csv",
             mime="text/csv",
         )
         
-        if st.button("اعتماد وضخ البيانات المصححة إلى BigQuery", type="primary"):
+        if st.button("اعتماد وضخ البيانات المستقلة إلى BigQuery", type="primary"):
             with st.spinner("جاري الضخ إلى المستودع..."):
                 upload_data_to_bigquery(st.session_state["preview_m"])
-                st.success("تم ضخ البيانات المصححة بنجاح إلى BigQuery وجاهزة كلياً لبناء استعلامات التحليل المالي!")
+                st.success("تم ضخ بيانات الملفات المستقلة بنجاح إلى BigQuery وجاهزة للتحليل التنفيذي!")
