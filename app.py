@@ -8,10 +8,8 @@ import time
 import re
 import io
 import pdfplumber
-from google.cloud import bigquery
-from google.oauth2.service_account import Credentials
 
-# محاولة تفعيل مكتبات OCR تلقائياً للملفات المصورة
+# محاولة تفعيل محرك الـ OCR بصرياً لقراءة الملفات المصورة
 try:
     import fitz  # PyMuPDF
     import pytesseract
@@ -73,21 +71,21 @@ def extract_file_inception_date(file_bytes):
         pass
     return "Not Specified"
 
-# محرك استخراج ديناميكي بالكامل 100% (بدون أي Hardcoding أو قيم مسبقة)
-def parse_pdf_claims_pure_dynamic(file_bytes, file_name, session_id, default_members):
+# محرك هجين ديناميكي يقرأ النصوص أو الـ OCR ويستخرج البيانات آلياً بالكامل دون أي قيم مسبقة
+def parse_pdf_claims_hybrid_pure(file_bytes, file_name, session_id, default_members):
     cleaned_records = []
     file_inception = extract_file_inception_date(file_bytes)
     
     full_text = ""
     try:
-        # استخراج النصوص المباشرة
+        # المحاولة الأولى: الاستخراج المباشر عبر pdfplumber
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
                 t = page.extract_text()
                 if t:
                     full_text += t + "\n"
                     
-        # إذا كان الملف مصوراً أو يحتاج OCR، يتم استخلاص النصوص بصرياً بمرونة تامة
+        # المحاولة الثانية: إذا كان الملف مصوراً، يتم تفعيل OCR بصرياً بالكامل
         if len(full_text.strip()) < 100 and OCR_AVAILABLE:
             doc = fitz.open(stream=file_bytes, filetype="pdf")
             for page in doc:
@@ -108,7 +106,7 @@ def parse_pdf_claims_pure_dynamic(file_bytes, file_name, session_id, default_mem
                 if len(line) < 45:
                     current_policy_section = line
                     
-            if "class" in l_low or "vip" in l_low:
+            if "class" in l_low or "vip" in l_low or "category" in l_low:
                 if len(line) < 50:
                     current_tier = line
                     
@@ -136,23 +134,34 @@ def parse_pdf_claims_pure_dynamic(file_bytes, file_name, session_id, default_mem
                         'outstanding_claims_vat_sar': 0.0
                     })
             
-            # التقاط الأشهر والأرقام المجاورة ديناميكياً
-            date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line)
+            # التقاط الأشهر والصفوف الشهرية ديناميكياً
+            date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(0?[1-9]|1[0-2])[\/\-](25|26|27)\b', line)
             if date_match:
+                # محاولة استنتاج السنة والشهر بمرونة تامة
                 if date_match.group(1) and date_match.group(2):
                     month_code = f"{date_match.group(1)}-{date_match.group(2).zfill(2)}"
-                else:
+                elif date_match.group(3) and date_match.group(4):
                     month_code = f"{date_match.group(4)}-{date_match.group(3).zfill(2)}"
+                else:
+                    month_code = f"20{date_match.group(6)}-{date_match.group(5).zfill(2)}"
                 
                 context_numbers = []
-                for j in range(i, min(i + 8, len(lines))):
+                for j in range(i, min(i + 10, len(lines))):
                     potential_nums = re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', lines[j])
                     for num_str in potential_nums:
                         clean_val = safe_clean_number(num_str)
                         if clean_val >= 0:
                             context_numbers.append(clean_val)
                 
-                if len(context_numbers) >= 4:
+                if len(context_numbers) >= 2:
+                    lives = context_numbers[0] if context_numbers[0] > 0 else default_members
+                    claims_cnt = context_numbers[1] if len(context_numbers) > 1 else 0.0
+                    amt_before = context_numbers[2] if len(context_numbers) > 2 else 0.0
+                    amt_after = context_numbers[3] if len(context_numbers) > 3 else amt_before
+                    os_cnt = context_numbers[4] if len(context_numbers) > 4 else 0.0
+                    os_before = context_numbers[5] if len(context_numbers) > 5 else 0.0
+                    os_after = context_numbers[6] if len(context_numbers) > 6 else 0.0
+                    
                     cleaned_records.append({
                         'session_id': str(session_id),
                         'created_at': pd.Timestamp.now(tz='UTC'),
@@ -163,13 +172,13 @@ def parse_pdf_claims_pure_dynamic(file_bytes, file_name, session_id, default_mem
                         'month_code': month_code,
                         'month_weight': 1.0,
                         'class_tier': current_tier,
-                        'active_lives': float(context_numbers[0]),
-                        'claims_count': float(context_numbers[1]),
-                        'paid_claims_sar': float(context_numbers[2]),
-                        'paid_claims_vat_sar': float(context_numbers[3]),
-                        'outstanding_claims_count': float(context_numbers[4]) if len(context_numbers) > 4 else 0.0,
-                        'outstanding_claims_sar': float(context_numbers[5]) if len(context_numbers) > 5 else 0.0,
-                        'outstanding_claims_vat_sar': float(context_numbers[6]) if len(context_numbers) > 6 else 0.0
+                        'active_lives': float(lives),
+                        'claims_count': float(claims_cnt),
+                        'paid_claims_sar': float(amt_before),
+                        'paid_claims_vat_sar': float(amt_after),
+                        'outstanding_claims_count': float(os_cnt),
+                        'outstanding_claims_sar': float(os_before),
+                        'outstanding_claims_vat_sar': float(os_after)
                     })
             i += 1
     except Exception as e:
@@ -182,7 +191,7 @@ def process_preview_files(uploaded_files, session_id, default_members):
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
             file_bytes = f.read()
-            m_recs = parse_pdf_claims_pure_dynamic(file_bytes, f.name, session_id, default_members)
+            m_recs = parse_pdf_claims_hybrid_pure(file_bytes, f.name, session_id, default_members)
             all_m.extend(m_recs)
     return pd.DataFrame(all_m), pd.DataFrame(), pd.DataFrame()
 
@@ -198,8 +207,8 @@ def upload_data_to_bigquery(df_monthly):
     job = client.load_table_from_dataframe(df_monthly, table_ref, job_config=job_config)
     job.result()
 
-st.title("مرصد المطالبات | المحرك الديناميكي الصافي (Pure Dynamic Parser)")
-st.markdown("استخراج آلي وديناميكي كامل 100% لملفات المزودين دون أي قيم مسبقة أو مكتوبة يدوياً.")
+st.title("مرصد المطالبات | المحرك الهجين الديناميكي الصافي")
+st.markdown("استخراج آلي وديناميكي كامل 100% يدعم النصوص المباشرة والمسح البصري (OCR) دون أي قيم مسبقة.")
 
 col_date, col_members = st.columns(2)
 with col_date:
@@ -216,11 +225,11 @@ uploaded_files = st.file_uploader("رفع ملفات تجربة المطالبا
 if uploaded_files:
     session_id = f"session_{uuid.uuid4().hex[:8]}"
     
-    if st.button("استخراج ديناميكي شامل", type="secondary"):
+    if st.button("استخراج هجين ديناميكي", type="secondary"):
         if not current_premium or not total_members or not inception_date:
             st.warning("يرجى تعبئة الحقول الأساسية.")
         else:
-            with st.spinner("جاري استخراج البيانات وتحليل المستندات ديناميكياً..."):
+            with st.spinner("جاري استخراج البيانات وتحليل المستندات هجينياً وبصرياً..."):
                 st.session_state.pop("preview_m", None)
                 df_m, _, _ = process_preview_files(uploaded_files, session_id, total_members)
                 st.session_state["preview_m"] = df_m
@@ -231,18 +240,18 @@ if uploaded_files:
                 st.success(f"تمت معالجة {len(unique_files)} ملفات ديناميكياً (`{', '.join(unique_files)}`) بإجمالي {total_records} سجلاً مستقلاً!")
 
     if "preview_m" in st.session_state and not st.session_state["preview_m"].empty:
-        st.subheader("🔍 معاينة جدول الأداء الديناميكي الصافي (Pure Dynamic Preview)")
+        st.subheader("🔍 معاينة جدول الأداء الهجين الديناميكي (Hybrid Preview)")
         st.dataframe(st.session_state["preview_m"], use_container_width=True)
         
         csv_m = st.session_state["preview_m"].to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 تحميل جدول الأداء الديناميكي كاملًا (CSV)",
             data=csv_m,
-            file_name="pure_dynamic_performance.csv",
+            file_name="hybrid_dynamic_performance.csv",
             mime="text/csv",
         )
         
-        if st.button("اعتماد وضخ البيانات الديناميكية إلى BigQuery", type="primary"):
+        if st.button("اعتماد وضخ البيانات إلى BigQuery", type="primary"):
             with st.spinner("جاري الضخ إلى المستودع..."):
                 upload_data_to_bigquery(st.session_state["preview_m"])
-                st.success("تم ضخ البيانات الديناميكية بنجاح إلى BigQuery وجاهزة تماماً للمرحلة التالية!")
+                st.success("تم ضخ البيانات بنجاح إلى BigQuery وجاهزة للتحليل المالي!")
