@@ -10,14 +10,15 @@ import io
 import pdfplumber
 import numpy as np
 
+# استيراد آمن ومحمي لمكتبات المعالجة البصرية والرقمية
 try:
     import cv2
     from pdf2image import convert_from_bytes
     import pytesseract
     import fitz  # PyMuPDF
-    VISION_READY = True
+    VISION_CORE_READY = True
 except ImportError:
-    VISION_READY = False
+    VISION_CORE_READY = False
 
 st.set_page_config(page_title="Claims Intelligence Portal", page_icon="📊", layout="wide")
 
@@ -49,12 +50,28 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# محرك معالجة شامل يضمن استخراج البيانات من أي ملف PDF (رقمي أو مصور)
-def parse_claims_direct_extraction(file_bytes, file_name, session_id, default_members):
+def extract_file_inception_date(text_content):
+    for line in text_content.split('\n'):
+        l_low = line.lower()
+        if any(kw in l_low for kw in ["inception", "effective", "period from", "from date", "processed to", "policy period"]):
+            return line.strip()
+    return "Not Specified"
+
+def deskew_and_enhance(image):
+    try:
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        # تحسين التباين للمعالجة البصرية الدقيقة
+        processed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+        return processed
+    except Exception:
+        return image
+
+# المحرك الشامل الموجه لخدمة عدة مستخدمين (Universal Multi-Tenant Parser)
+def parse_claims_universal_multitenant(file_bytes, file_name, session_id, default_members):
     cleaned_records = []
     raw_text = ""
     
-    # المحاولة الأولى: الاستخراج الرقمي المباشر
+    # 1. محاولة القراءة الرقمية المباشرة أولاً
     try:
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
@@ -64,42 +81,22 @@ def parse_claims_direct_extraction(file_bytes, file_name, session_id, default_me
     except Exception:
         pass
 
-    # المحاولة الثانية: إذا كان الملف مصوراً، تطبيق المعالجة البصرية المذكورة في الدليل المرفق
-    if len(raw_text.strip()) < 50 and VISION_READY:
+    # 2. إذا كان الملف مصوراً (Scanned PDF)، يتم تطبيق الفحص البصري العميق عبر PyMuPDF و Tesseract
+    if len(raw_text.strip()) < 100 and VISION_CORE_READY:
         try:
-            pages = convert_from_bytes(file_bytes)
-            for page in pages:
-                img_arr = np.array(page)
-                gray = cv2.cvtColor(img_arr, cv2.COLOR_RGB2GRAY)
-                text = pytesseract.image_to_string(gray)
-                raw_text += text + "\n"
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            for page in doc:
+                pix = page.get_pixmap(dpi=200)
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+                enhanced_img = deskew_and_enhance(np.array(img))
+                ocr_text = pytesseract.image_to_string(enhanced_img)
+                raw_text += ocr_text + "\n"
         except Exception as e:
-            st.error(f"خطأ في المعالجة البصرية للملف {file_name}: {str(e)}")
+            st.warning(f"ملاحظة في المعالجة البصرية للملف {file_name}: {str(e)}")
 
+    file_inception = extract_file_inception_date(raw_text)
     lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
     
-    # إذا فشل التقاط الأسطر بالطرق التقليدية، نطبق استخراجاً مرناً يضمن عدم بقاء الجدول فارغاً
-    if len(lines) == 0:
-        cleaned_records.append({
-            'session_id': str(session_id),
-            'created_at': pd.Timestamp.now(tz='UTC'),
-            'policy_year': 'RAW_TEST',
-            'policy_year_label': 'General Policy Extract',
-            'source_file': file_name,
-            'policy_inception_date': 'Inception Active',
-            'month_code': '2026-01',
-            'month_weight': 1.0,
-            'class_tier': 'CLASS GENERAL',
-            'active_lives': float(default_members),
-            'claims_count': 1.0,
-            'paid_claims_sar': 0.0,
-            'paid_claims_vat_sar': 0.0,
-            'outstanding_claims_count': 0.0,
-            'outstanding_claims_sar': 0.0,
-            'outstanding_claims_vat_sar': 0.0
-        })
-        return cleaned_records
-
     current_tier = "GENERAL CLASS"
     current_policy_section = "Last Policy Year"
     
@@ -115,7 +112,32 @@ def parse_claims_direct_extraction(file_bytes, file_name, session_id, default_me
         if "class" in l_low or "vip" in l_low or "category" in l_low:
             if len(line) < 50:
                 current_tier = line
+        
+        # التقاط صف البداية ديناميكياً وعزله كمرجع مستقل
+        if "lives at start" in l_low or "number of lives at start" in l_low:
+            nums = re.findall(r'\b\d{1,3}(?:,\d{3})*\b', line)
+            if nums:
+                start_val = safe_clean_number(nums[0])
+                cleaned_records.append({
+                    'session_id': str(session_id),
+                    'created_at': pd.Timestamp.now(tz='UTC'),
+                    'policy_year': 'RAW_TEST',
+                    'policy_year_label': 'Policy Start Reference',
+                    'source_file': file_name,
+                    'policy_inception_date': file_inception,
+                    'month_code': 'START_LIVES',
+                    'month_weight': 0.0,
+                    'class_tier': current_tier,
+                    'active_lives': float(start_val),
+                    'claims_count': 0.0,
+                    'paid_claims_sar': 0.0,
+                    'paid_claims_vat_sar': 0.0,
+                    'outstanding_claims_count': 0.0,
+                    'outstanding_claims_sar': 0.0,
+                    'outstanding_claims_vat_sar': 0.0
+                })
 
+        # التقاط الشهور والصفوف الشهرية واستخراج الأرقام ديناميكياً
         date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line)
         if date_match:
             if date_match.group(1) and date_match.group(2):
@@ -136,6 +158,9 @@ def parse_claims_direct_extraction(file_bytes, file_name, session_id, default_me
                 claims_cnt = context_numbers[1] if len(context_numbers) > 1 else 0.0
                 amt_before = context_numbers[2] if len(context_numbers) > 2 else 0.0
                 amt_after = context_numbers[3] if len(context_numbers) > 3 else amt_before
+                os_cnt = context_numbers[4] if len(context_numbers) > 4 else 0.0
+                os_before = context_numbers[5] if len(context_numbers) > 5 else 0.0
+                os_after = context_numbers[6] if len(context_numbers) > 6 else 0.0
                 
                 cleaned_records.append({
                     'session_id': str(session_id),
@@ -143,7 +168,7 @@ def parse_claims_direct_extraction(file_bytes, file_name, session_id, default_me
                     'policy_year': 'RAW_TEST',
                     'policy_year_label': current_policy_section,
                     'source_file': file_name,
-                    'policy_inception_date': 'Inception Active',
+                    'policy_inception_date': file_inception,
                     'month_code': month_code,
                     'month_weight': 1.0,
                     'class_tier': current_tier,
@@ -151,31 +176,11 @@ def parse_claims_direct_extraction(file_bytes, file_name, session_id, default_me
                     'claims_count': float(claims_cnt),
                     'paid_claims_sar': float(amt_before),
                     'paid_claims_vat_sar': float(amt_after),
-                    'outstanding_claims_count': 0.0,
-                    'outstanding_claims_sar': 0.0,
-                    'outstanding_claims_vat_sar': 0.0
+                    'outstanding_claims_count': float(os_cnt),
+                    'outstanding_claims_sar': float(os_before),
+                    'outstanding_claims_vat_sar': float(os_after)
                 })
         i += 1
-        
-    if len(cleaned_records) == 0:
-        cleaned_records.append({
-            'session_id': str(session_id),
-            'created_at': pd.Timestamp.now(tz='UTC'),
-            'policy_year': 'RAW_TEST',
-            'policy_year_label': 'Extracted Summary',
-            'source_file': file_name,
-            'policy_inception_date': 'Inception Active',
-            'month_code': '2026-01',
-            'month_weight': 1.0,
-            'class_tier': current_tier,
-            'active_lives': float(default_members),
-            'claims_count': 1.0,
-            'paid_claims_sar': 0.0,
-            'paid_claims_vat_sar': 0.0,
-            'outstanding_claims_count': 0.0,
-            'outstanding_claims_sar': 0.0,
-            'outstanding_claims_vat_sar': 0.0
-        })
         
     return cleaned_records
 
@@ -184,7 +189,7 @@ def process_preview_files(uploaded_files, session_id, default_members):
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
             file_bytes = f.read()
-            m_recs = parse_claims_direct_extraction(file_bytes, f.name, session_id, default_members)
+            m_recs = parse_claims_universal_multitenant(file_bytes, f.name, session_id, default_members)
             all_m.extend(m_recs)
     return pd.DataFrame(all_m), pd.DataFrame(), pd.DataFrame()
 
@@ -200,29 +205,31 @@ def upload_data_to_bigquery(df_monthly):
     job = client.load_table_from_dataframe(df_monthly, table_ref, job_config=job_config)
     job.result()
 
-st.title("مرصد المطالبات | المحرك المباشر الشامل")
-st.markdown("استخراج آلي يضمن قراءة كافة المستندات (الرقمية والمصورة) وعرضها في لوحة المعاينة.")
+st.title("مرصد المطالبات الذكي | بوابة متعددة المستخدمين")
+st.markdown("منصة مركزية تتيح لأي مستخدم رفع تقارير المطالبات (رقمية أو مصورة) واستخراجها آلياً لتوليد لوحات القرار.")
 
-col_date, col_members = st.columns(2)
+col_user, col_date = st.columns(2)
+with col_user:
+    user_identifier = st.text_input("معرف الجهة أو المستخدم (Tenant ID)", value="Company_Default")
 with col_date:
     inception_date = st.date_input("تاريخ بداية سريان الوثيقة", value=None)
-with col_members:
-    total_members = st.number_input("إجمالي عدد المؤمن عليهم (Lives)", min_value=1, max_value=1000000, value=None, step=1)
 
-col_prem, _ = st.columns(2)
+col_members, col_prem = st.columns(2)
+with col_members:
+    total_members = st.number_input("إجمالي عدد المؤمن عليهم (Lives)", min_value=1, max_value=1000000, value=45, step=1)
 with col_prem:
-    current_premium = st.number_input("قسط الوثيقة السنوي الحالي (SAR)", min_value=1000.0, max_value=500000000.0, value=None, step=50000.0, format="%.2f")
+    current_premium = st.number_input("قسط الوثيقة السنوي الحالي (SAR)", min_value=1000.0, max_value=500000000.0, value=450000.0, step=50000.0, format="%.2f")
 
 uploaded_files = st.file_uploader("رفع ملفات تجربة المطالبات (PDF)", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
-    session_id = f"session_{uuid.uuid4().hex[:8]}"
+    session_id = f"tenant_{user_identifier}_{uuid.uuid4().hex[:6]}"
     
-    if st.button("تشغيل الاستخراج الشامل المضمون", type="secondary"):
+    if st.button("معالجة وتحليل الملفات للمستخدم الحالي", type="secondary"):
         if not current_premium or not total_members or not inception_date:
             st.warning("يرجى تعبئة الحقول الأساسية.")
         else:
-            with st.spinner("جاري معالجة المستندات واستخراج البيانات..."):
+            with st.spinner("جاري فحص الملفات ومعالجتها بصرياً ورقمياً للمستخدم..."):
                 st.session_state.pop("preview_m", None)
                 df_m, _, _ = process_preview_files(uploaded_files, session_id, total_members)
                 st.session_state["preview_m"] = df_m
@@ -230,21 +237,21 @@ if uploaded_files:
                 
                 unique_files = df_m['source_file'].unique() if not df_m.empty else []
                 total_records = len(df_m)
-                st.success(f"تمت معالجة {len(unique_files)} ملفات بنجاح (`{', '.join(unique_files)}`) بإجمالي {total_records} سجلاً مستقراً!")
+                st.success(f"تمت معالجة {len(unique_files)} ملفات بنجاح للمستخدم `{user_identifier}` بإجمالي {total_records} سجلاً مستقلاً!")
 
     if "preview_m" in st.session_state and not st.session_state["preview_m"].empty:
-        st.subheader("🔍 معاينة جدول الأداء المضمون (Direct Extraction Preview)")
+        st.subheader("🔍 معاينة جدول الأداء المخصص للمستخدم (Multi-Tenant Preview)")
         st.dataframe(st.session_state["preview_m"], use_container_width=True)
         
         csv_m = st.session_state["preview_m"].to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 تحميل جدول الأداء كاملًا (CSV)",
             data=csv_m,
-            file_name="direct_extracted_performance.csv",
+            file_name=f"claims_performance_{user_identifier}.csv",
             mime="text/csv",
         )
         
-        if st.button("اعتماد وضخ البيانات إلى BigQuery", type="primary"):
-            with st.spinner("جاري الضخ إلى المستودع..."):
+        if st.button("اعتماد وضخ بيانات المستخدم إلى BigQuery", type="primary"):
+            with st.spinner("جاري ضخ بيانات الجلسة إلى المستودع المركزي..."):
                 upload_data_to_bigquery(st.session_state["preview_m"])
-                st.success("تم ضخ البيانات بنجاح إلى BigQuery وجاهزة بالكامل لتوليد مؤشرات التحليل المالي!")
+                st.success(f"تم ضخ بيانات المستخدم `{user_identifier}` بنجاح إلى BigQuery وأصبحت لوحة المؤشرات جاهزة للتفاعل المباشر!")
