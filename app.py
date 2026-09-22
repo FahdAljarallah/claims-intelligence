@@ -7,12 +7,13 @@ import urllib.parse
 import time
 import re
 import io
-import numpy as np
-import cv2
-from pdf2image import convert_from_bytes
+import pdfplumber
 
+# محرك الـ OCR الاحتياطي للملفات المصورة
 try:
+    import fitz  # PyMuPDF
     import pytesseract
+    from PIL import Image
     OCR_AVAILABLE = True
 except ImportError:
     OCR_AVAILABLE = False
@@ -47,41 +48,45 @@ def safe_clean_number(val):
     match = re.search(r'[-+]?\d*\.?\d+', val_str)
     return float(match.group()) if match else 0.0
 
-# خطوة المعالجة البصرية المذكورة في المقال (Deskew & Preprocessing)
-def deskew_and_preprocess(image_pil):
-    image_arr = np.array(image_pil)
-    gray = cv2.cvtColor(image_arr, cv2.COLOR_RGB2GRAY)
-    gray = cv2.bitwise_not(gray)
-    coords = np.column_stack(np.where(gray > 0))
-    if len(coords) > 0:
-        angle = cv2.minAreaRect(coords)[-1]
-        if angle < -45:
-            angle = -(90 + angle)
-        else:
-            angle = -angle
-        (h, w) = image_arr.shape[:2]
-        center = (w // 2, h // 2)
-        M = cv2.getRotationMatrix2D(center, angle, 1.0)
-        image_arr = cv2.warpAffine(image_arr, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-    return image_arr
-
-# محرك الـ OCR الحقيقي المستوحى من دليل Dr Booma للملفات المصورة
-def parse_pdf_claims_dr_booma_ocr(file_bytes, file_name, session_id, default_members):
-    cleaned_records = []
-    file_inception = "Inception 30/11/2025" if "ce" in file_name.lower() else "Inception 01-12-2024"
-    
-    full_text = ""
+def extract_file_inception_date(file_bytes):
+    text = ""
     try:
-        # تحويل صفحات الـ PDF إلى صور عبر pdf2image (كما ورد في المقال)
-        images = convert_from_bytes(file_bytes)
-        
-        for page_img in images:
-            preprocessed_img = deskew_and_preprocess(page_img)
-            if OCR_AVAILABLE:
-                text = pytesseract.image_to_string(preprocessed_img)
-                full_text += text + "\n"
-        
-        lines = [l.strip() for l in full_text.split('\n') if l.strip()]
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            for page in pdf.pages[:2]:
+                t = page.extract_text()
+                if t:
+                    text += t + "\n"
+        for line in text.split('\n'):
+            l_low = line.lower()
+            if any(kw in l_low for kw in ["inception", "effective", "period from", "from date", "processed to", "policy period"]):
+                return line.strip()
+    except Exception:
+        pass
+    return "Not Specified"
+
+# موجه ذكي يحدد تلقائياً هل الملف رقمي أم مصور، ويعالجه بالطريقة المناسبة دون تدخل المستخدم
+def parse_pdf_claims_smart_router(file_bytes, file_name, session_id, default_members):
+    cleaned_records = []
+    file_inception = extract_file_inception_date(file_bytes)
+    
+    extracted_text = ""
+    try:
+        # الخطوة 1: فحص وجود طبقة نصية مباشرة
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            for page in pdf.pages:
+                t = page.extract_text()
+                if t:
+                    extracted_text += t + "\n"
+                    
+        # الخطوة 2: إذا كانت الطبقة النصية فارغة، يوجه النظام الملف تلقائياً لمحرك الـ OCR
+        if len(extracted_text.strip()) < 50 and OCR_AVAILABLE:
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            for page in doc:
+                pix = page.get_pixmap(dpi=150)
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+                extracted_text += pytesseract.image_to_string(img) + "\n"
+                
+        lines = [l.strip() for l in extracted_text.split('\n') if l.strip()]
         current_tier = "GENERAL CLASS"
         current_policy_section = "Last Policy Year"
         
@@ -122,7 +127,7 @@ def parse_pdf_claims_dr_booma_ocr(file_bytes, file_name, session_id, default_mem
                         'outstanding_claims_vat_sar': 0.0
                     })
 
-            # التقاط الأشهر والأرقام المستخرجة بصرياً
+            # التقاط الأشهر والصفوف الشهرية واستخراج الأرقام ديناميكياً
             date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line)
             if date_match:
                 if date_match.group(1) and date_match.group(2):
@@ -167,7 +172,7 @@ def parse_pdf_claims_dr_booma_ocr(file_bytes, file_name, session_id, default_mem
                     })
             i += 1
     except Exception as e:
-        st.error(f"خطأ في معالجة OCR للملف {file_name}: {str(e)}")
+        st.error(f"خطأ في معالجة المستند {file_name}: {str(e)}")
         
     return cleaned_records
 
@@ -176,7 +181,7 @@ def process_preview_files(uploaded_files, session_id, default_members):
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
             file_bytes = f.read()
-            m_recs = parse_pdf_claims_dr_booma_ocr(file_bytes, f.name, session_id, default_members)
+            m_recs = parse_pdf_claims_smart_router(file_bytes, f.name, session_id, default_members)
             all_m.extend(m_recs)
     return pd.DataFrame(all_m), pd.DataFrame(), pd.DataFrame()
 
@@ -192,8 +197,8 @@ def upload_data_to_bigquery(df_monthly):
     job = client.load_table_from_dataframe(df_monthly, table_ref, job_config=job_config)
     job.result()
 
-st.title("مرصد المطالبات | محرك الـ OCR البصري المتطور")
-st.markdown("استخراج النصوص وتحويل المستندات المصورة عبر `pdf2image` و `pytesseract` بدقة تامة.")
+st.title("مرصد المطالبات | الموجه الذكي التلقائي للمستندات")
+st.markdown("رفع الملفات ومجلس الإدارة الآلي يحدد نوع الملف (رقمي أو مصور) ويعالجه ويوحده دون أي تدخل بشري.")
 
 col_date, col_members = st.columns(2)
 with col_date:
@@ -210,11 +215,11 @@ uploaded_files = st.file_uploader("رفع ملفات تجربة المطالبا
 if uploaded_files:
     session_id = f"session_{uuid.uuid4().hex[:8]}"
     
-    if st.button("تشغيل الاستخراج البصري (OCR)", type="secondary"):
+    if st.button("معالجة ذكية وتوحيد البيانات", type="secondary"):
         if not current_premium or not total_members or not inception_date:
             st.warning("يرجى تعبئة الحقول الأساسية.")
         else:
-            with st.spinner("جاري تحويل الصفحات إلى صور ومعالجتها بصرياً عبر OCR..."):
+            with st.spinner("جاري فحص المستندات وتوجيهها للمحرك المناسب آلياً..."):
                 st.session_state.pop("preview_m", None)
                 df_m, _, _ = process_preview_files(uploaded_files, session_id, total_members)
                 st.session_state["preview_m"] = df_m
@@ -222,21 +227,21 @@ if uploaded_files:
                 
                 unique_files = df_m['source_file'].unique() if not df_m.empty else []
                 total_records = len(df_m)
-                st.success(f"تمت المعالجة البصرية لـ {len(unique_files)} ملفات بنجاح (`{', '.join(unique_files)}`) بإجمالي {total_records} سجلاً مستخرجاً!")
+                st.success(f"تمت معالجة {len(unique_files)} ملفات بنجاح (`{', '.join(unique_files)}`) بإجمالي {total_records} سجلاً موحداً ومنظماً!")
 
     if "preview_m" in st.session_state and not st.session_state["preview_m"].empty:
-        st.subheader("🔍 معاينة الأداء عبر الـ OCR (OCR Extracted Preview)")
+        st.subheader("🔍 معاينة جدول الأداء الموحد الذكي (Smart Router Preview)")
         st.dataframe(st.session_state["preview_m"], use_container_width=True)
         
         csv_m = st.session_state["preview_m"].to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 تحميل جدول الأداء البصري كاملًا (CSV)",
+            label="📥 تحميل جدول الأداء الموحد كاملًا (CSV)",
             data=csv_m,
-            file_name="ocr_extracted_performance.csv",
+            file_name="smart_routed_performance.csv",
             mime="text/csv",
         )
         
-        if st.button("اعتماد وضخ البيانات البصرية إلى BigQuery", type="primary"):
+        if st.button("اعتماد وضخ البيانات إلى BigQuery", type="primary"):
             with st.spinner("جاري الضخ إلى المستودع..."):
                 upload_data_to_bigquery(st.session_state["preview_m"])
-                st.success("تم ضخ البيانات البصرية بنجاح إلى BigQuery وجاهزة للتحليل المالي!")
+                st.success("تم ضخ البيانات بنجاح إلى BigQuery وجاهزة بالكامل لتوليد المؤشرات التنفيذية!")
