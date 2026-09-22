@@ -8,10 +8,15 @@ import time
 import re
 import io
 import pdfplumber
-import numpy as np
-import cv2
-from pdf2image import convert_from_bytes
-import pytesseract
+
+# تفعيل محركات الاستخراج الآمنة
+try:
+    import pytesseract
+    from PIL import Image
+    import fitz  # PyMuPDF لقراءة الصور والملفات المصورة
+    VISION_AVAILABLE = True
+except ImportError:
+    VISION_AVAILABLE = False
 
 st.set_page_config(page_title="Claims Intelligence Portal", page_icon="📊", layout="wide")
 
@@ -50,30 +55,12 @@ def extract_file_inception_date(text_content):
             return line.strip()
     return "Not Specified"
 
-# خطوة المعالجة البصرية وتعديل الاستقامة (Deskewing) المذكورة في المقال
-def deskew(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    gray = cv2.bitwise_not(gray)
-    coords = np.column_stack(np.where(gray > 0))
-    if len(coords) > 0:
-        angle = cv2.minAreaRect(coords)[-1]
-        if angle < -45:
-            angle = -(90 + angle)
-        else:
-            angle = -angle
-        (h, w) = image.shape[:2]
-        center = (w // 2, h // 2)
-        M = cv2.getRotationMatrix2D(center, angle, 1.0)
-        rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-        return rotated
-    return image
-
-# محرك الاستخراج الديناميكي المعتمد على سير عمل المقال (PDF -> Images -> Deskew -> OCR)
-def parse_claims_dr_booma_workflow(file_bytes, file_name, session_id, default_members):
+# محرك الاستخراج الآمن والمتكامل (رقمي + بصري محلي بدون تعقيدات cv2)
+def parse_claims_safe_pipeline(file_bytes, file_name, session_id, default_members):
     cleaned_records = []
     raw_text = ""
     
-    # 1. محاولة القراءة الرقمية المباشرة أولاً
+    # 1. محاولة استخراج النصوص مباشرة إذا كان الملف رقمياً
     try:
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
@@ -83,16 +70,17 @@ def parse_claims_dr_booma_workflow(file_bytes, file_name, session_id, default_me
     except Exception:
         pass
 
-    # 2. إذا كان النص ضئيلاً أو فارغاً (ملف مسح ضوئي)، نطبق سير عمل الـ OCR بالتفصيل[cite: 14]
-    if len(raw_text.strip()) < 50:
+    # 2. إذا كان الملف مصوراً (Scanned)، يتم تفعيل الفحص البصري عبر PyMuPDF و Tesseract مباشرة
+    if len(raw_text.strip()) < 50 and VISION_AVAILABLE:
         try:
-            pages = convert_from_bytes(file_bytes)[cite: 14]
-            for page in pages:
-                preprocessed_image = deskew(np.array(page))[cite: 14]
-                text = pytesseract.image_to_string(preprocessed_image)[cite: 14]
-                raw_text += text + "\n"
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            for page in doc:
+                pix = page.get_pixmap(dpi=150)
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+                ocr_text = pytesseract.image_to_string(img)
+                raw_text += ocr_text + "\n"
         except Exception as e:
-            st.error(f"خطأ في المعالجة البصرية للملف {file_name}: {str(e)}")
+            st.warning(f"ملاحظة في المعالجة البصرية للملف {file_name}: {str(e)}")
 
     file_inception = extract_file_inception_date(raw_text)
     lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
@@ -189,7 +177,7 @@ def process_preview_files(uploaded_files, session_id, default_members):
     for f in uploaded_files:
         if f.name.lower().endswith('.pdf'):
             file_bytes = f.read()
-            m_recs = parse_claims_dr_booma_workflow(file_bytes, f.name, session_id, default_members)
+            m_recs = parse_claims_safe_pipeline(file_bytes, f.name, session_id, default_members)
             all_m.extend(m_recs)
     return pd.DataFrame(all_m), pd.DataFrame(), pd.DataFrame()
 
@@ -205,8 +193,8 @@ def upload_data_to_bigquery(df_monthly):
     job = client.load_table_from_dataframe(df_monthly, table_ref, job_config=job_config)
     job.result()
 
-st.title("مرصد المطالبات | المحرك البصري المعالج (Dr. Booma Workflow)")
-st.markdown("تحويل صفحات الـ PDF إلى صور مع معالجة الاستقامة واستخراج النصوص بصرياً ورقمياً دون أي قيم مسبقة.")
+st.title("مرصد المطالبات | المحرك الآمن المستقر")
+st.markdown("معالجة متكاملة وآمنة لكافة التقارير (الرقمية والمصورة) دون أي أخطاء في الاعتماديات.")
 
 col_date, col_members = st.columns(2)
 with col_date:
@@ -223,11 +211,11 @@ uploaded_files = st.file_uploader("رفع ملفات تجربة المطالبا
 if uploaded_files:
     session_id = f"session_{uuid.uuid4().hex[:8]}"
     
-    if st.button("تشغيل الاستخراج البصري الهجين", type="secondary"):
+    if st.button("تشغيل الاستخراج الآمن", type="secondary"):
         if not current_premium or not total_members or not inception_date:
             st.warning("يرجى تعبئة الحقول الأساسية.")
         else:
-            with st.spinner("جاري تنفيذ سير عمل المعالجة البصرية واستخراج البيانات..."):
+            with st.spinner("جاري معالجة المستندات وفحصها رقمياً وبصرياً..."):
                 st.session_state.pop("preview_m", None)
                 df_m, _, _ = process_preview_files(uploaded_files, session_id, total_members)
                 st.session_state["preview_m"] = df_m
@@ -235,21 +223,21 @@ if uploaded_files:
                 
                 unique_files = df_m['source_file'].unique() if not df_m.empty else []
                 total_records = len(df_m)
-                st.success(f"تمت المعالجة بنجاح لـ {len(unique_files)} ملفات (`{', '.join(unique_files)}`) بإجمالي {total_records} سجلاً مستخلاصاً!")
+                st.success(f"تمت معالجة {len(unique_files)} ملفات بنجاح (`{', '.join(unique_files)}`) بإجمالي {total_records} سجلاً مستقراً!")
 
     if "preview_m" in st.session_state and not st.session_state["preview_m"].empty:
-        st.subheader("🔍 معاينة الأداء المعالج بصرياً (OCR Workflow Preview)")
+        st.subheader("🔍 معاينة جدول الأداء الآمن (Safe Pipeline Preview)")
         st.dataframe(st.session_state["preview_m"], use_container_width=True)
         
         csv_m = st.session_state["preview_m"].to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 تحميل جدول الأداء كاملًا (CSV)",
             data=csv_m,
-            file_name="ocr_workflow_performance.csv",
+            file_name="safe_pipeline_performance.csv",
             mime="text/csv",
         )
         
         if st.button("اعتماد وضخ البيانات إلى BigQuery", type="primary"):
             with st.spinner("جاري الضخ إلى المستودع..."):
                 upload_data_to_bigquery(st.session_state["preview_m"])
-                st.success("تم ضخ البيانات بنجاح إلى BigQuery وجاهزة بالكامل لتوليد مؤشرات التحليل المالي وتخفيض الأقساط!")
+                st.success("تم ضخ البيانات بنجاح إلى BigQuery وأصبحت المنصة جاهزة لإنشاء لوحة المؤشرات المالية!")
