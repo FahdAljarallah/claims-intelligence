@@ -6,3 +6,7 @@ gspread>=6.0.0
 google-auth>=2.25.0
 google-cloud-bigquery>=3.14.0
 plotly>=5.18.0
+opencv-python-headless
+opencv-python
+pytesseract
+pdf2image
