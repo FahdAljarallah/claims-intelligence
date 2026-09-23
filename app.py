@@ -97,13 +97,20 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
             current_policy_year = row_text.strip()
             continue
             
-        # التقاط اسم الفئة ديناميكياً بالاعتماد على keywords عامة دون افتراض VIP
+        # التقاط اسم الفئة بالكامل وبنفس التنسيق الأصلي للوثيقة (مثل CLASS VIP) ودون نقاط زائدة
         if "class" in line_lower or "tier" in line_lower or "الفئة" in line_lower:
-            clean_class = re.sub(r'(class\s*type|class\s*tier|class|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
+            clean_class = re.sub(r'(class\s*type|class\s*tier|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
                 clean_class = row_text.split(":")[-1].strip()
+            
+            if "class" in row_text.lower() and not clean_class.lower().startswith("class"):
+                match_class_full = re.search(r'(class\b.*)', row_text, flags=re.IGNORECASE)
+                if match_class_full:
+                    clean_class = match_class_full.group(1).strip()
+            
             if clean_class:
-                current_class_tier = clean_class
+                # إزالة النقطة الزائدة إن وجدت في النهاية بشرط ألا تكون جزءاً مقصوداً من التسمية
+                current_class_tier = clean_class[:-1].strip() if clean_class.endswith('.') and not clean_class.lower().endswith('vip.') else clean_class
             continue
         elif current_class_tier and not any(k in line_lower for k in ["monthly claim", "breakdown", "top 20", "limit", "coinsurance"]) and len(row_text) > 5 and not re.search(r'\b(20\d{2})\b', row_text):
             if any(w in line_lower for w in ["female", "male", "employee", "without", "maternity", "divorced"]):
