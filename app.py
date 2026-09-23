@@ -195,22 +195,26 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (مطابقة شاملة غير مقيدة)
+        # 2. القسم الثاني: Breakdown by Benefit (منع ضياع الماترينتي عند تداخل الـ OCR مع سطر الإجمالي)
         elif current_section == "benefit":
+            # استبعاد صفوف الإجمالي الخالصة فقط وعدم استبعاد السطور التي تحتوي على منافع حقيقية
+            if re.search(r'\b(total|الإجمالي)\b', line_lower) and not any(b in line_lower for b in ['out', 'in', 'dental', 'optical', 'mat', 'lab', 'consultation', 'pharmacy', 'med']):
+                continue
+
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
-            if nums and len(row_text) > 4 and not any(w in line_lower for w in ['total', 'limit', 'coinsurance', 'الإجمالي']):
+            if nums and len(row_text) > 4 and not any(w in line_lower for w in ['limit', 'coinsurance']):
                 upper_text = row_text.upper()
                 benefit_label = None
                 
-                if "OUT" in upper_text or "OUT-PATIENT" in upper_text or ("BASIC" in upper_text and "OUT" in upper_text):
+                if "OUT" in upper_text or "OUT-PATIENT" in upper_text:
                     benefit_label = "Basic Coverage (Out-Patient)"
-                elif "IN" in upper_text or "IN-PATIENT" in upper_text or ("BASIC" in upper_text and "IN" in upper_text):
+                elif "IN" in upper_text or "IN-PATIENT" in upper_text:
                     benefit_label = "Basic Coverage (In-Patient)"
                 elif "DENTAL" in upper_text:
                     benefit_label = "Dental"
                 elif "OPTICAL" in upper_text:
                     benefit_label = "Optical"
-                elif "MAT" in upper_text or "MATERNITY" in upper_text:
+                elif "MAT" in upper_text:
                     benefit_label = "Maternity"
                 elif "LAB" in upper_text:
                     benefit_label = "Lab"
@@ -239,8 +243,10 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
         
         # 3. القسم الثالث: Top 20 utilised providers
         elif current_section == "providers":
+            if re.search(r'\b(total|الإجمالي)\b', line_lower):
+                continue
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
-            if nums and len(row_text) > 4 and not any(w in line_lower for w in ['total', 'provider', 'الإجمالي']):
+            if nums and len(row_text) > 4 and not any(w in line_lower for w in ['provider']):
                 provider_rows.append({
                     "created_at": created_at_ts,
                     "policy_year": current_policy_year or "LAST POLICY YEAR",
@@ -285,7 +291,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطبيق محرك المطابقة الشامل..."):
+        with st.spinner("جاري قراءة الملف وتطبيق معالجة صفوف الإجمالي..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
