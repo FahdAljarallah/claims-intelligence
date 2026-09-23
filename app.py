@@ -36,85 +36,55 @@ def clean_number(val):
 
 def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, current_premium):
     parsed_months_data = []
-    raw_text = ""
     
-    # 1. محاولة استخراج النص والجداول بالطريقة المباشرة (Native PDF Text)
     try:
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
-                t = page.extract_text()
-                if t:
-                    raw_text += t + "\n"
-                
                 tables = page.extract_tables()
-                if tables:
-                    for table in tables:
-                        for row in table:
-                            row_cells = [str(c).strip() for c in row if c is not None and str(c).strip() != '']
-                            if not row_cells:
-                                continue
-                            
-                            row_date = None
-                            row_claims = 0.0
-                            for cell in row_cells:
-                                date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', cell)
-                                if date_match and not row_date:
-                                    if date_match.group(1) and date_match.group(2):
-                                        row_date = f"{date_match.group(1)}-{date_match.group(2).zfill(2)}"
-                                    else:
-                                        row_date = f"{date_match.group(4)}-{date_match.group(3).zfill(2)}"
+                for table in tables:
+                    for row in table:
+                        # تنظيف الخلايا وتجاهل القيم الفارغة
+                        row_cells = [str(c).strip() for c in row if c is not None and str(c).strip() != '']
+                        if not row_cells:
+                            continue
+                        
+                        row_date = None
+                        lives_val = int(total_members)
+                        claims_val = 0.0
+                        
+                        for cell in row_cells:
+                            # البحث عن صيغة الشهر والسنة مثل 11/2025 أو 01/2026
+                            date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', cell)
+                            if date_match and not row_date:
+                                if date_match.group(1) and date_match.group(2):
+                                    row_date = f"{date_match.group(2)}-{date_match.group(1).zfill(2)}"
+                                else:
+                                    row_date = f"{date_match.group(3)}-{date_match.group(4).zfill(2)}"
+                        
+                        # إذا وجدنا سطراً يحتوي على شهر، نقوم باستخراج الأرقام الرقمية المرتبطة به في نفس الصف
+                        if row_date:
+                            numeric_cells = [clean_number(c) for c in row_cells if clean_number(c) > 0]
+                            # عادة الأعمدة تكون: [الشهر, عدد المؤمنين, المطالبات الصافية، ...]
+                            if len(numeric_cells) >= 2:
+                                # محاولة تحديد عدد الأرواح والمطالبات بدقة بناءً على موقعها
+                                possible_lives = [n for n in numeric_cells if n < 10000] # الأعداد الصغيرة تمثل الموظفين غالباً
+                                possible_claims = [n for n in numeric_cells if n > 1000]  # الأعداد الكبيرة تمثل المبالغ
                                 
-                                num_val = clean_number(cell)
-                                if num_val > 100:
-                                    row_claims = num_val
+                                if possible_lives:
+                                    lives_val = int(possible_lives[0])
+                                if possible_claims:
+                                    claims_val = possible_claims[0] # أول مبلغ كبير عادة هو Net Paid Claims
                             
-                            if row_date and row_claims > 0:
+                            if claims_val > 0:
                                 parsed_months_data.append({
                                     "month_code": row_date,
-                                    "extracted_claims": row_claims
+                                    "active_lives": lives_val,
+                                    "paid_claims": claims_val
                                 })
     except Exception as e:
-        st.warning(f"ملاحظة في استخراج النص المباشر: {str(e)}")
+        st.error(f"خطأ أثناء قراءة الجدول من الملف: {str(e)}")
 
-    # 2. إذا لم يتم العثور على نص كافٍ أو جدول، نقوم بتفعيل الـ OCR عبر Tesseract (للملفات المسحوبة ضوئياً / الصور)
-    if not raw_text.strip() and not parsed_months_data:
-        st.info("الملف غير نصي أو مسحوب ضوئياً، جاري معالجة الصور عبر محرك التعرف الضوئي (OCR)...")
-        try:
-            images = pdf2image.convert_from_bytes(file_bytes)
-            for img in images:
-                # دعم اللغتين العربية والإنجليزية لضمان قراءة التقارير بدقة
-                ocr_text = pytesseract.image_to_string(img, lang='ara+eng')
-                if ocr_text:
-                    raw_text += ocr_text + "\n"
-        except Exception as ocr_err:
-            st.error(f"خطأ في تشغيل محرك الـ OCR: {str(ocr_err)}")
-
-    # 3. تحليل النص الخام المستخرج (سواء من النص المباشر أو الناتج عن الـ OCR)
-    if not parsed_months_data and raw_text:
-        lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
-        for idx, line in enumerate(lines):
-            date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line)
-            if date_match:
-                if date_match.group(1) and date_match.group(2):
-                    m_code = f"{date_match.group(1)}-{date_match.group(2).zfill(2)}"
-                else:
-                    m_code = f"{date_match.group(4)}-{date_match.group(3).zfill(2)}"
-                
-                nums_in_context = []
-                for scan_idx in range(idx, min(idx + 4, len(lines))):
-                    found_nums = re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', lines[scan_idx])
-                    for num_str in found_nums:
-                        val = clean_number(num_str)
-                        if val > 100:
-                            nums_in_context.append(val)
-                
-                if nums_in_context:
-                    parsed_months_data.append({
-                        "month_code": m_code,
-                        "extracted_claims": nums_in_context[0]
-                    })
-
-    # بناء الجدول النهائي
+    # بناء جدول البيانات النهائي المطابق تماماً لملف الـ PDF
     final_rows = []
     if parsed_months_data:
         seen_months = set()
@@ -122,13 +92,14 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
             m = item["month_code"]
             if m not in seen_months:
                 seen_months.add(m)
-                clm_val = item["extracted_claims"]
+                clm_val = item["paid_claims"]
+                lives_val = item["active_lives"]
                 final_rows.append({
                     "tenant_id": str(tenant_id),
                     "created_at": pd.Timestamp.now(tz='UTC').isoformat(),
                     "source_file": file_name,
                     "month_code": m,
-                    "active_lives": int(total_members),
+                    "active_lives": lives_val,
                     "annual_premium_sar": float(current_premium),
                     "paid_claims_sar": float(clm_val),
                     "loss_ratio_pct": float(round((clm_val / (current_premium / 12)) * 100, 2)) if current_premium > 0 else 0.0
