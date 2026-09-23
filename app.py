@@ -43,38 +43,62 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                 if t:
                     raw_text += t + "\n"
                 
-                # استخراج الجداول الفعليّة مباشرة من الصفحة
+                # المحاولة الأولى: استخراج الجداول المنظمة
                 tables = page.extract_tables()
-                for table in tables:
-                    for row in table:
-                        row_cells = [str(c).strip() for c in row if c is not None and str(c).strip() != '']
-                        if not row_cells:
-                            continue
-                        
-                        # البحث عن الشهر ورقم المطالبة داخل نفس الصف الجدولى
-                        row_date = None
-                        row_claims = 0.0
-                        
-                        for cell in row_cells:
-                            date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', cell)
-                            if date_match and not row_date:
-                                if date_match.group(1) and date_match.group(2):
-                                    row_date = f"{date_match.group(1)}-{date_match.group(2).zfill(2)}"
-                                else:
-                                    row_date = f"{date_match.group(4)}-{date_match.group(3).zfill(2)}"
+                if tables:
+                    for table in tables:
+                        for row in table:
+                            row_cells = [str(c).strip() for c in row if c is not None and str(c).strip() != '']
+                            if not row_cells:
+                                continue
                             
-                            # محاولة استخراج القيم المالية الكبيرة التي تمثل المطالبات
-                            num_val = clean_number(cell)
-                            if num_val > 100: # افتراض أن المطالبة تتجاوز المبالغ البسيطة
-                                row_claims = num_val
-                        
-                        if row_date and row_claims > 0:
-                            parsed_months_data.append({
-                                "month_code": row_date,
-                                "extracted_claims": row_claims
-                            })
+                            row_date = None
+                            row_claims = 0.0
+                            for cell in row_cells:
+                                date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', cell)
+                                if date_match and not row_date:
+                                    if date_match.group(1) and date_match.group(2):
+                                        row_date = f"{date_match.group(1)}-{date_match.group(2).zfill(2)}"
+                                    else:
+                                        row_date = f"{date_match.group(4)}-{date_match.group(3).zfill(2)}"
+                                
+                                num_val = clean_number(cell)
+                                if num_val > 100:
+                                    row_claims = num_val
+                            
+                            if row_date and row_claims > 0:
+                                parsed_months_data.append({
+                                    "month_code": row_date,
+                                    "extracted_claims": row_claims
+                                })
     except Exception as e:
         st.error(f"خطأ في قراءة الملف الفعلي: {str(e)}")
+
+    # المحاولة الثانية (الاحتياطية): إذا لم تصد الجداول شيئاً، نقوم بمسح النص الخام سطر بسطر
+    if not parsed_months_data and raw_text:
+        lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
+        for idx, line in enumerate(lines):
+            date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line)
+            if date_match:
+                if date_match.group(1) and date_match.group(2):
+                    m_code = f"{date_match.group(1)}-{date_match.group(2).zfill(2)}"
+                else:
+                    m_code = f"{date_match.group(4)}-{date_match.group(3).zfill(2)}"
+                
+                # البحث عن الأرقام القريبة في نفس السطر أو الأسطر المجاورة
+                nums_in_context = []
+                for scan_idx in range(idx, min(idx + 3, len(lines))):
+                    found_nums = re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', lines[scan_idx])
+                    for num_str in found_nums:
+                        val = clean_number(num_str)
+                        if val > 100:
+                            nums_in_context.append(val)
+                
+                if nums_in_context:
+                    parsed_months_data.append({
+                        "month_code": m_code,
+                        "extracted_claims": nums_in_context[0]
+                    })
 
     # بناء الجدول النهائي
     final_rows = []
@@ -83,7 +107,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
         for item in parsed_months_data:
             m = item["month_code"]
             if m not in seen_months:
-                seen_months.add(m)  # تم تصحيح القوس هنا
+                seen_months.add(m)
                 clm_val = item["extracted_claims"]
                 final_rows.append({
                     "tenant_id": str(tenant_id),
