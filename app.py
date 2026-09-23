@@ -100,14 +100,15 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
             current_policy_year = "LAST POLICY YEAR"
             continue
             
-        # التقاط اسم الفئة بالكامل ودون اقتصاص كلمة CLASS
+        # التقاط اسم الفئة وتنقيته من تكرار التسمية والنقاط الزائدة غير المقصدة
         if "class" in line_lower or "tier" in line_lower or "vip" in line_lower or "الفئة" in line_lower:
-            if ":" in row_text:
+            # استخراج النص الصافي بعد الرمز أو التسمية
+            clean_class = re.sub(r'(class\s*type|class\s*tier|class|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
+            if not clean_class and ":" in row_text:
                 clean_class = row_text.split(":")[-1].strip()
-            else:
-                clean_class = row_text.strip()
             if clean_class:
-                current_class_tier = clean_class
+                # إزالة أي نقطة مفردة زائدة في النهاية إن لم تكن جزءاً من اسم الفئة
+                current_class_tier = clean_class[:-1].strip() if clean_class.endswith('.') and not clean_class.lower().endswith('vip.') else clean_class
             continue
         elif current_class_tier and not any(k in line_lower for k in ["monthly claim", "breakdown", "top 20", "limit", "coinsurance"]) and len(row_text) > 5 and not re.search(r'\b(20\d{2})\b', row_text):
             if any(w in line_lower for w in ["female", "male", "employee", "without", "maternity", "divorced"]):
@@ -162,14 +163,39 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                 nums = [n for n in all_nums if n != m_val and n != y_val]
                 
                 if nums:
-                    # تثبيت الترتيب الدقيق للأعمدة الـ 7 للمطالبات الشهرية
                     active_lives_val = int(nums[0]) if len(nums) > 0 else int(total_members)
-                    claims_cnt_val = int(nums[1]) if len(nums) > 1 else 0
-                    p_sar = float(nums[2]) if len(nums) > 2 else 0.0
-                    p_vat = float(nums[3]) if len(nums) > 3 else 0.0
-                    os_cnt = int(nums[4]) if len(nums) > 4 else 0
-                    os_sar = float(nums[5]) if len(nums) > 5 else 0.0
-                    os_vat = float(nums[6]) if len(nums) > 6 else 0.0
+                    
+                    # معالجة ذكية لمنع تخطي عمود عدد المطالبات (Claims Count) بغض النظر عن طول المصفوفة
+                    if len(nums) >= 7:
+                        claims_cnt_val = int(nums[1])
+                        p_sar = float(nums[2])
+                        p_vat = float(nums[3])
+                        os_cnt = int(nums[4])
+                        os_sar = float(nums[5])
+                        os_vat = float(nums[6])
+                    elif len(nums) == 6:
+                        # في حال تم دمج Active Lives مع Claims Count أو اختفاء أحدهما
+                        if nums[1] < 10:
+                            claims_cnt_val = int(nums[1])
+                            p_sar = float(nums[2])
+                            p_vat = float(nums[3])
+                            os_cnt = int(nums[4])
+                            os_sar = float(nums[5])
+                            os_vat = 0.0
+                        else:
+                            claims_cnt_val = 0
+                            p_sar = float(nums[1])
+                            p_vat = float(nums[2])
+                            os_cnt = int(nums[3])
+                            os_sar = float(nums[4])
+                            os_vat = float(nums[5])
+                    else:
+                        claims_cnt_val = int(nums[1]) if len(nums) > 1 else 0
+                        p_sar = float(nums[2]) if len(nums) > 2 else 0.0
+                        p_vat = float(nums[3]) if len(nums) > 3 else 0.0
+                        os_cnt = int(nums[4]) if len(nums) > 4 else 0
+                        os_sar = float(nums[5]) if len(nums) > 5 else 0.0
+                        os_vat = float(nums[6]) if len(nums) > 6 else 0.0
 
                     monthly_rows.append({
                         "created_at": created_at_ts,
@@ -230,7 +256,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
 
 # واجهة Streamlit
 st.title("مرصد المطالبات التأمينية | المعاينة والربط الذكي")
-st.markdown("استخراج الأقسام الثلاثة باستخدام الإحداثيات المكانية لضمان مطابقة الأعمدة وأسماء الفئات بدقة مطلقة.")
+st.markdown("استخراج الأقسام الثلاثة بدقة تامة والربط المباشر مع مستودع BigQuery.")
 
 col_1, col_2 = st.columns(2)
 with col_1:
@@ -248,7 +274,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطبيق محرك الإحداثيات المكانية..."):
+        with st.spinner("جاري قراءة الملف وتطبيق محرك الإحداثيات المكانية والتنقية..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, tenant_id, total_members, current_premium)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
