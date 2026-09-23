@@ -62,7 +62,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                 current_policy_year = "LAST POLICY YEAR"
                 continue
                 
-            # التقاط اسم الفئة مع الحفاظ على أي نقاط أصلية مقصودة (مثل VIP.)
+            # التقاط اسم الفئة مع الحفاظ الكامل على أي نقاط أصلية مقصودة (مثل VIP.)
             if "class" in line_lower or "tier" in line_lower or "vip" in line_lower or "الفئة" in line_lower:
                 clean_class = re.sub(r'(class\s*type|class\s*tier|class|الفئة[:\s]*)', '', line, flags=re.IGNORECASE).strip()
                 if clean_class:
@@ -121,19 +121,40 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                     nums = [n for n in all_nums if n != m_val and n != y_val]
                     
                     if nums:
+                        # خوارزمية التصحيح الذكي لضمان عدم ضياع عمود عدد المطالبات مهما كانت قيمة الأعداد صغيرة
+                        active_lives_val = int(nums[0]) if len(nums) > 0 else int(total_members)
+                        
+                        # إذا كان هناك مبالغ مالية كبيرة في البداية بسبب دمج الـ OCR، نقوم بالمعالجة الذكية
+                        if len(nums) >= 6 and nums[1] > 100:
+                            # الـ OCR دمج Active Lives مع رقم آخر أو تخطى claims_count
+                            claims_cnt_val = 0
+                            p_sar = float(nums[1])
+                            p_vat = float(nums[2]) if len(nums) > 2 else 0.0
+                            os_cnt = int(nums[3]) if len(nums) > 3 else 0
+                            os_sar = float(nums[4]) if len(nums) > 4 else 0.0
+                            os_vat = float(nums[5]) if len(nums) > 5 else 0.0
+                        else:
+                            # الترتيب الطبيعي السليم
+                            claims_cnt_val = int(nums[1]) if len(nums) > 1 else 0
+                            p_sar = float(nums[2]) if len(nums) > 2 else 0.0
+                            p_vat = float(nums[3]) if len(nums) > 3 else 0.0
+                            os_cnt = int(nums[4]) if len(nums) > 4 else 0
+                            os_sar = float(nums[5]) if len(nums) > 5 else 0.0
+                            os_vat = float(nums[6]) if len(nums) > 6 else 0.0
+
                         monthly_rows.append({
                             "created_at": created_at_ts,
                             "policy_year": current_policy_year,
                             "table_header": file_name,
                             "month_code": row_date,
                             "class_tier": current_class_tier,
-                            "active_lives": int(nums[0]) if len(nums) > 0 else int(total_members),
-                            "claims_count": int(nums[1]) if len(nums) > 1 else 0,
-                            "paid_claims_sar": float(nums[2]) if len(nums) > 2 else 0.0,
-                            "paid_claims_vat_sar": float(nums[3]) if len(nums) > 3 else 0.0,
-                            "OS_claims_count": int(nums[4]) if len(nums) > 4 else 0,
-                            "OS paid_claims_sar": float(nums[5]) if len(nums) > 5 else 0.0,
-                            "OS paid_claims_vat_sar": float(nums[6]) if len(nums) > 6 else 0.0,
+                            "active_lives": active_lives_val,
+                            "claims_count": claims_cnt_val,
+                            "paid_claims_sar": p_sar,
+                            "paid_claims_vat_sar": p_vat,
+                            "OS_claims_count": os_cnt,
+                            "OS paid_claims_sar": os_sar,
+                            "OS paid_claims_vat_sar": os_vat,
                             "section_type": "Monthly Claims"
                         })
             
