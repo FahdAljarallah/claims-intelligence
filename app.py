@@ -195,7 +195,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (شامل لتسميات Optical و Basic Coverage و Maternity)
+        # 2. القسم الثاني: Breakdown by Benefit (شامل لتسميات Maternity و Optical وغيرها بدقة)
         elif current_section == "benefit":
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
             if nums and len(row_text) > 4 and not any(w in line_lower for w in ['total', 'limit', 'coinsurance', 'الإجمالي']):
@@ -210,7 +210,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     benefit_label = "Dental"
                 elif "OPTICAL" in upper_text:
                     benefit_label = "Optical"
-                elif "MATERNITY" in upper_text:
+                elif "MATERNITY" in upper_text or "MAT" in upper_text:
                     benefit_label = "Maternity"
                 elif "LAB" in upper_text:
                     benefit_label = "Lab"
