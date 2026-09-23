@@ -239,7 +239,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     "benefit_name": benefit_label
                 })
         
-        # 3. القسم الثالث: Top 20 Providers (عزل اسم المزود متضمناً الأرقام الفرعية بدقة تامة)
+        # 3. القسم الثالث: Top 20 Providers
         elif current_section == "providers":
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
             
@@ -302,7 +302,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطهير أسماء المزودين والأعمدة بدقة..."):
+        with st.spinner("جاري قراءة الملف وتطهير السجلات بدقة تامة..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
@@ -338,7 +338,7 @@ if uploaded_file:
         st.markdown("---")
         col_dl, col_bq = st.columns(2)
         
-        with tabdl:
+        with col_dl:
             csv_export = df_res.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="📥 تحميل التقرير الكامل بصيغة (CSV)",
