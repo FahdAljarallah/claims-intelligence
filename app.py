@@ -35,7 +35,6 @@ def clean_number(val):
         return 0.0
 
 def extract_structured_rows_from_image(img):
-    """استخراج الكلمات مع إحداثياتها المكانية وتجميعها في صفوف مرتبة أفقياً حسب موقع الـ X"""
     data = pytesseract.image_to_data(img, output_type=Output.DICT, lang='eng+ara')
     n_boxes = len(data['text'])
     words = []
@@ -50,7 +49,6 @@ def extract_structured_rows_from_image(img):
                 'text': text
             })
     
-    # تجميع الكلمات حسب الارتفاع (Top) لتشكيل الصفوف (تسامح 12 بكسل)
     words = sorted(words, key=lambda w: (w['top'], w['left']))
     rows = []
     current_row = []
@@ -63,7 +61,6 @@ def extract_structured_rows_from_image(img):
             if current_top == -1:
                 current_top = w['top']
         else:
-            # ترتيب الكلمات داخل السطر من اليسار لليمين بناءً على الإحداثي الأفقي left
             current_row = sorted(current_row, key=lambda x: x['left'])
             rows.append(current_row)
             current_row = [w]
@@ -103,9 +100,12 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
             current_policy_year = "LAST POLICY YEAR"
             continue
             
-        # التقاط اسم الفئة مع الحفاظ الكامل على الحروف والنقاط الأصلية (مثل VIP.)
+        # التقاط اسم الفئة بالكامل ودون اقتصاص كلمة CLASS
         if "class" in line_lower or "tier" in line_lower or "vip" in line_lower or "الفئة" in line_lower:
-            clean_class = re.sub(r'(class\s*type|class\s*tier|class|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
+            if ":" in row_text:
+                clean_class = row_text.split(":")[-1].strip()
+            else:
+                clean_class = row_text.strip()
             if clean_class:
                 current_class_tier = clean_class
             continue
@@ -125,8 +125,6 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
             continue
         
         created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
-        
-        # استخراج الأمر المكاني للكلمات والأرقام مرتبة من اليسار لليمين
         row_tokens = [w['text'] for w in row]
         
         # 1. القسم الأول: Monthly Claims
@@ -164,6 +162,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                 nums = [n for n in all_nums if n != m_val and n != y_val]
                 
                 if nums:
+                    # تثبيت الترتيب الدقيق للأعمدة الـ 7 للمطالبات الشهرية
                     active_lives_val = int(nums[0]) if len(nums) > 0 else int(total_members)
                     claims_cnt_val = int(nums[1]) if len(nums) > 1 else 0
                     p_sar = float(nums[2]) if len(nums) > 2 else 0.0
@@ -231,7 +230,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
 
 # واجهة Streamlit
 st.title("مرصد المطالبات التأمينية | المعاينة والربط الذكي")
-st.markdown("استخراج الأقسام الثلاثة باستخدام الإحداثيات المكانية (Spatial Parsing) لضمان مطابقة الأعمدة بدقة مطلقة والربط بـ BigQuery.")
+st.markdown("استخراج الأقسام الثلاثة باستخدام الإحداثيات المكانية لضمان مطابقة الأعمدة وأسماء الفئات بدقة مطلقة.")
 
 col_1, col_2 = st.columns(2)
 with col_1:
