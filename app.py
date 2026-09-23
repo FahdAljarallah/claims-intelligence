@@ -62,7 +62,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                 current_policy_year = "LAST POLICY YEAR"
                 continue
                 
-            # التقاط اسم الفئة (مع دعم الأسطر الطويلة والممتدة)
+            # التقاط اسم الفئة مع الحفاظ على أي نقاط أصلية مقصودة (مثل VIP.)
             if "class" in line_lower or "tier" in line_lower or "vip" in line_lower or "الفئة" in line_lower:
                 clean_class = re.sub(r'(class\s*type|class\s*tier|class|الفئة[:\s]*)', '', line, flags=re.IGNORECASE).strip()
                 if clean_class:
@@ -70,7 +70,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                 continue
             elif current_class_tier and not any(k in line_lower for k in ["monthly claim", "breakdown", "top 20", "limit", "coinsurance"]) and len(line) > 5 and not re.search(r'\b(20\d{2})\b', line):
                 if any(w in line_lower for w in ["female", "male", "employee", "without", "maternity", "divorced"]):
-                    current_class_tier += " " + line.strip()
+                    current_class_tier = current_class_tier + " " + line.strip()
                     continue
                 
             # تحديد الأقسام الرئيسية
@@ -121,28 +121,19 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                     nums = [n for n in all_nums if n != m_val and n != y_val]
                     
                     if nums:
-                        active_lives_val = int(nums[0]) if len(nums) > 0 else int(total_members)
-                        # التحقق الذكي لضمان محاذاة عمود عدد المطالبات (Claims Count) بدقة
-                        if len(nums) > 1 and nums[1] < 100:
-                            claims_cnt_val = int(nums[1])
-                            offset = 1
-                        else:
-                            claims_cnt_val = 0
-                            offset = 0
-                            
                         monthly_rows.append({
                             "created_at": created_at_ts,
                             "policy_year": current_policy_year,
                             "table_header": file_name,
                             "month_code": row_date,
                             "class_tier": current_class_tier,
-                            "active_lives": active_lives_val,
-                            "claims_count": claims_cnt_val,
-                            "paid_claims_sar": float(nums[2 + (offset - 1)]) if len(nums) > (2 + (offset - 1)) else 0.0,
-                            "paid_claims_vat_sar": float(nums[3 + (offset - 1)]) if len(nums) > (3 + (offset - 1)) else 0.0,
-                            "OS_claims_count": int(nums[4 + (offset - 1)]) if len(nums) > (4 + (offset - 1)) else 0,
-                            "OS paid_claims_sar": float(nums[5 + (offset - 1)]) if len(nums) > (5 + (offset - 1)) else 0.0,
-                            "OS paid_claims_vat_sar": float(nums[6 + (offset - 1)]) if len(nums) > (6 + (offset - 1)) else 0.0,
+                            "active_lives": int(nums[0]) if len(nums) > 0 else int(total_members),
+                            "claims_count": int(nums[1]) if len(nums) > 1 else 0,
+                            "paid_claims_sar": float(nums[2]) if len(nums) > 2 else 0.0,
+                            "paid_claims_vat_sar": float(nums[3]) if len(nums) > 3 else 0.0,
+                            "OS_claims_count": int(nums[4]) if len(nums) > 4 else 0,
+                            "OS paid_claims_sar": float(nums[5]) if len(nums) > 5 else 0.0,
+                            "OS paid_claims_vat_sar": float(nums[6]) if len(nums) > 6 else 0.0,
                             "section_type": "Monthly Claims"
                         })
             
@@ -155,7 +146,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                         "policy_year": current_policy_year,
                         "table_header": file_name,
                         "class_tier": current_class_tier,
-                        "benefit_name": line[:40],
+                        "benefit_name": line[:40].strip(),
                         "claims_count": int(nums[0]) if len(nums) > 5 else 0,
                         "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
                         "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
@@ -174,7 +165,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                         "policy_year": current_policy_year,
                         "table_header": file_name,
                         "class_tier": current_class_tier,
-                        "provider_name": line[:40],
+                        "provider_name": line[:40].strip(),
                         "claims_count": int(nums[0]) if len(nums) > 5 else 0,
                         "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
                         "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
@@ -189,7 +180,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
 
 # واجهة Streamlit
 st.title("مرصد المطالبات التأمينية | المعاينة والربط الذكي")
-st.markdown("استخراج الأقسام الثلاثة مع المعاينة والربط المباشر مع BigQuery.")
+st.markdown("استخراج الأقسام الثلاثة بدقة متناهية والربط المباشر مع مستودع BigQuery.")
 
 col_1, col_2 = st.columns(2)
 with col_1:
