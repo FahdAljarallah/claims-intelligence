@@ -195,22 +195,22 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (مطابقة مرنة وشاملة)
+        # 2. القسم الثاني: Breakdown by Benefit (مطابقة شاملة غير مقيدة)
         elif current_section == "benefit":
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
             if nums and len(row_text) > 4 and not any(w in line_lower for w in ['total', 'limit', 'coinsurance', 'الإجمالي']):
                 upper_text = row_text.upper()
                 benefit_label = None
                 
-                if "OUT" in upper_text or "OUT-PATIENT" in upper_text:
+                if "OUT" in upper_text or "OUT-PATIENT" in upper_text or ("BASIC" in upper_text and "OUT" in upper_text):
                     benefit_label = "Basic Coverage (Out-Patient)"
-                elif "IN" in upper_text or "IN-PATIENT" in upper_text:
+                elif "IN" in upper_text or "IN-PATIENT" in upper_text or ("BASIC" in upper_text and "IN" in upper_text):
                     benefit_label = "Basic Coverage (In-Patient)"
                 elif "DENTAL" in upper_text:
                     benefit_label = "Dental"
                 elif "OPTICAL" in upper_text:
                     benefit_label = "Optical"
-                elif "MAT" in upper_text:
+                elif "MAT" in upper_text or "MATERNITY" in upper_text:
                     benefit_label = "Maternity"
                 elif "LAB" in upper_text:
                     benefit_label = "Lab"
@@ -231,7 +231,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
                         "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
                         "OS_claims_count": int(nums[3]) if len(nums) > 5 else 0,
-                        "OS paid_claims_sar": float(nums[4]) if len(nums) > 5 else 0.0,
+                        "OS paid_claims_sar": float(nums[4]) if len(nums) > 4 else 0.0,
                         "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
                         "section_type": "Breakdown by Benefit",
                         "benefit_name": benefit_label
@@ -252,7 +252,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
                     "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
                     "OS_claims_count": int(nums[3]) if len(nums) > 5 else 0,
-                    "OS paid_claims_sar": float(nums[4]) if len(nums) > 5 else 0.0,
+                    "OS paid_claims_sar": float(nums[4]) if len(nums) > 4 else 0.0,
                     "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
                     "section_type": "Top 20 Providers",
                     "provider_name": row_text[:40].strip()
@@ -285,7 +285,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطبيق مطابقة الكلمات الجذرية..."):
+        with st.spinner("جاري قراءة الملف وتطبيق محرك المطابقة الشامل..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
