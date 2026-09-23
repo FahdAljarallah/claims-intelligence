@@ -35,83 +35,120 @@ def clean_number(val):
         return 0.0
 
 def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, current_premium):
-    parsed_months_data = []
-    raw_text = ""
+    monthly_data = []
+    benefit_data = []
+    providers_data = []
     
-    # 1. بما أن الملف عبارة عن نسخة مسحوبة ضوئياً (Scanned Copy)، نبدأ مباشرة بتحويله لصور وتشغيل الـ OCR
+    raw_text = ""
     try:
         images = pdf2image.convert_from_bytes(file_bytes)
         for img in images:
-            # استخدام اللغتين الإنجليزية والعربية لأن الجداول تحتوي على أرقام وتواريخ إنجليزية ومسميات
             ocr_text = pytesseract.image_to_string(img, lang='eng+ara')
             if ocr_text:
                 raw_text += ocr_text + "\n"
     except Exception as e:
-        st.error(f"خطأ في تحويل وتشغيل الـ OCR على المستند: {str(e)}")
+        st.error(f"خطأ في تشغيل الـ OCR: {str(e)}")
 
-    # 2. تحليل النص المستخرج عبر الـ OCR للبحث عن صفوف الأشهر والمبالغ
     if raw_text:
         lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
+        current_section = "unknown"
+        
         for idx, line in enumerate(lines):
-            # البحث عن صيغ التواريخ الشهرية مثل MM/YYYY أو YYYY/MM (مثال: 11/2025 أو 01/2026)
-            date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', line)
+            line_lower = line.lower()
             
-            if date_match:
-                if date_match.group(1) and date_match.group(2):
-                    row_date = f"{date_match.group(2)}-{date_match.group(1).zfill(2)}"
-                else:
-                    row_date = f"{date_match.group(3)}-{date_match.group(4).zfill(2)}"
-                
-                # تجميع كافة الأرقام الموجودة في السطر والأسطر المجاورة له (بسبب تداخل مسح الـ OCR)
-                context_numbers = []
-                for scan_idx in range(max(0, idx - 1), min(len(lines), idx + 2)):
-                    found_nums = re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', lines[scan_idx])
-                    for num_str in found_nums:
-                        val = clean_number(num_str)
-                        if val > 0:
-                            context_numbers.append(val)
-                
-                # استخلاص الأعداد والمبالغ بحسب منطق الجدول
-                # الأعداد الصغيرة (أقل من 10000) عادة تمثل عدد الموظفين (Lives)
-                # الأعداد الكبيرة تمثل المطالبات (Paid Claims)
-                lives_val = int(total_members)
-                claims_val = 0.0
-                
-                possible_lives = [n for n in context_numbers if n < 10000 and n != int(row_date.split('-')[0]) and n != int(row_date.split('-')[1])]
-                possible_claims = [n for n in context_numbers if n > 1000] # المبالغ التأمينية عادة تتجاوز 1000 ريال
-                
-                if possible_lives:
-                    lives_val = int(possible_lives[0])
-                if possible_claims:
-                    claims_val = possible_claims[0] # أول مبلغ كبير يمثل المطالبات الصافية
-                
-                if row_date and claims_val > 0:
-                    parsed_months_data.append({
-                        "month_code": row_date,
-                        "active_lives": lives_val,
-                        "paid_claims": claims_val
+            # تحديد القسم الحالي بناءً على العناوين الظاهرة في التقرير
+            if "monthly claim" in line_lower or "الشهري" in line_lower:
+                current_section = "monthly"
+                continue
+            elif "breakdown by benefit" in line_lower or "التوزيع حسب المنفعة" in line_lower:
+                current_section = "benefit"
+                continue
+            elif "top 20" in line_lower or "utilised providers" in line_lower or "مزودي الخدمة" in line_lower:
+                current_section = "providers"
+                continue
+            
+            # استخراج البيانات حسب القسم النشط
+            if current_section == "monthly":
+                date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', line)
+                if date_match:
+                    if date_match.group(1) and date_match.group(2):
+                        row_date = f"{date_match.group(2)}-{date_match.group(1).zfill(2)}"
+                    else:
+                        row_date = f"{date_match.group(3)}-{date_match.group(4).zfill(2)}"
+                    
+                    nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line) if clean_number(n) > 0]
+                    claims_val = nums[-1] if nums else 0.0
+                    if claims_val > 0:
+                        monthly_data.append({
+                            "month_code": row_date,
+                            "paid_claims": claims_val
+                        })
+                        
+            elif current_section == "benefit":
+                # التقاط تفاصيل المنفعة والمبالغ المرتبطة بها
+                nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line) if clean_number(n) > 0]
+                if nums and len(line) > 5:
+                    benefit_data.append({
+                        "benefit_name": line[:40],
+                        "benefit_claims": nums[-1]
+                    })
+                    
+            elif current_section == "providers":
+                # التقاط أسماء مقدمي الخدمة والمبالغ
+                nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line) if clean_number(n) > 0]
+                if nums and len(line) > 5:
+                    providers_data.append({
+                        "provider_name": line[:40],
+                        "provider_amount": nums[-1]
                     })
 
-    # 3. بناء جدول البيانات النهائي
+    # بناء الجدول الموحد (يمكنك توجيهه للجدول الرئيسي أو جداول منفصلة في BigQuery)
     final_rows = []
-    if parsed_months_data:
+    if monthly_data:
         seen_months = set()
-        for item in parsed_months_data:
+        for item in monthly_data:
             m = item["month_code"]
             if m not in seen_months:
                 seen_months.add(m)
                 clm_val = item["paid_claims"]
-                lives_val = item["active_lives"]
                 final_rows.append({
                     "tenant_id": str(tenant_id),
                     "created_at": pd.Timestamp.now(tz='UTC').isoformat(),
                     "source_file": file_name,
-                    "month_code": m,
-                    "active_lives": lives_val,
+                    "section_type": "Monthly Claims",
+                    "item_name": m,
+                    "active_lives": int(total_members),
                     "annual_premium_sar": float(current_premium),
                     "paid_claims_sar": float(clm_val),
                     "loss_ratio_pct": float(round((clm_val / (current_premium / 12)) * 100, 2)) if current_premium > 0 else 0.0
                 })
+                
+    # إضافة بيانات المنافع ومزودي الخدمة كأقسام إضافية في نفس الجدول لسهولة الحفظ في BigQuery
+    for b in benefit_data:
+        final_rows.append({
+            "tenant_id": str(tenant_id),
+            "created_at": pd.Timestamp.now(tz='UTC').isoformat(),
+            "source_file": file_name,
+            "section_type": "Breakdown by Benefit",
+            "item_name": b["benefit_name"],
+            "active_lives": int(total_members),
+            "annual_premium_sar": float(current_premium),
+            "paid_claims_sar": float(b["benefit_claims"]),
+            "loss_ratio_pct": 0.0
+        })
+        
+    for p in providers_data:
+        final_rows.append({
+            "tenant_id": str(tenant_id),
+            "created_at": pd.Timestamp.now(tz='UTC').isoformat(),
+            "source_file": file_name,
+            "section_type": "Top 20 Providers",
+            "item_name": p["provider_name"],
+            "active_lives": int(total_members),
+            "annual_premium_sar": float(current_premium),
+            "paid_claims_sar": float(p["provider_amount"]),
+            "loss_ratio_pct": 0.0
+        })
     
     return pd.DataFrame(final_rows)
 
