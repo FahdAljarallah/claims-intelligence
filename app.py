@@ -113,7 +113,8 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                 current_class_tier = clean_class
             continue
         elif current_class_tier and not any(k in line_lower for k in ["monthly claim", "breakdown", "top 20", "limit", "coinsurance"]) and len(row_text) > 5 and not re.search(r'\b(20\d{2})\b', row_text):
-            if any(w in line_lower for w in ["female", "male", "employee", "without", "maternity", "divorced"]):
+            # تم إزالة "maternity" من هنا لمنع اعتراض صفوف الأمومة وابتلاعها داخل اسم الفئة
+            if any(w in line_lower for w in ["female", "male", "employee", "without", "divorced"]):
                 current_class_tier = current_class_tier + " " + row_text.strip()
                 continue
             
@@ -195,7 +196,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (معالجة فائقة المرونة للأسطر المدمجة)
+        # 2. القسم الثاني: Breakdown by Benefit (عزل سليم تماماً لصفوف المنافع)
         elif current_section == "benefit":
             benefit_label = None
             line_full_lower = row_text.lower()
@@ -287,7 +288,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطبيق الفصل الذكي للأسطر المدمجة..."):
+        with st.spinner("جاري قراءة الملف وتطهير الفئات من صفوف الأمومة..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
@@ -329,7 +330,7 @@ if uploaded_file:
                 label="📥 تحميل التقرير الكامل بصيغة (CSV)",
                 data=csv_export,
                 file_name=f"claims_export_{tenant_id}.csv",
-                mime="text/csv",
+                mime="text/css",
                 use_container_width=True
             )
             
