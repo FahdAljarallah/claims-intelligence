@@ -239,7 +239,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     "benefit_name": benefit_label
                 })
         
-        # 3. القسم الثالث: Top 20 Providers (عزل اسم المزود بذكاء وحماية الأعمدة العددية)
+        # 3. القسم الثالث: Top 20 Providers (عزل اسم المزود متضمناً الأرقام الفرعية بدقة تامة)
         elif current_section == "providers":
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
             
@@ -248,7 +248,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
 
             non_num_tokens = []
             for t in row_tokens:
-                if t.replace(',', '').replace('.', '').isdigit() and len(t) > 1 and row_tokens.index(t) > 1:
+                if (t.replace(',', '').replace('.', '').isdigit() and float(t.replace(',', '')) > 9) or '.' in t:
                     break
                 non_num_tokens.append(t)
             
@@ -256,17 +256,21 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
             if not prov_name or len(prov_name) < 2 or prov_name.isdigit():
                 prov_name = row_text[:40].strip()
 
+            real_nums = [clean_number(t) for t in row_tokens[len(non_num_tokens):] if re.search(r'\d', t)]
+            if not real_nums or len(real_nums) < 3:
+                real_nums = nums
+
             provider_rows.append({
                 "created_at": created_at_ts,
                 "policy_year": current_policy_year or "LAST POLICY YEAR",
                 "table_header": file_name,
                 "class_tier": current_class_tier or "CLASS GENERAL",
-                "claims_count": int(nums[0]) if len(nums) > 0 else 0,
-                "paid_claims_sar": float(nums[1]) if len(nums) > 1 else 0.0,
-                "paid_claims_vat_sar": float(nums[2]) if len(nums) > 2 else 0.0,
-                "OS_claims_count": int(nums[3]) if len(nums) > 3 else 0,
-                "OS paid_claims_sar": float(nums[4]) if len(nums) > 4 else 0.0,
-                "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
+                "claims_count": int(real_nums[0]) if len(real_nums) > 0 else 0,
+                "paid_claims_sar": float(real_nums[1]) if len(real_nums) > 1 else 0.0,
+                "paid_claims_vat_sar": float(real_nums[2]) if len(real_nums) > 2 else 0.0,
+                "OS_claims_count": int(real_nums[3]) if len(real_nums) > 3 else 0,
+                "OS paid_claims_sar": float(real_nums[4]) if len(real_nums) > 4 else 0.0,
+                "OS paid_claims_vat_sar": float(real_nums[5]) if len(real_nums) > 5 else 0.0,
                 "section_type": "Top 20 Providers",
                 "provider_name": prov_name
             })
@@ -298,7 +302,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطهير صفوف المزودين والأعمدة بدقة..."):
+        with st.spinner("جاري قراءة الملف وتطهير أسماء المزودين والأعمدة بدقة..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
@@ -334,7 +338,7 @@ if uploaded_file:
         st.markdown("---")
         col_dl, col_bq = st.columns(2)
         
-        with col_dl:
+        with tabdl:
             csv_export = df_res.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="📥 تحميل التقرير الكامل بصيغة (CSV)",
