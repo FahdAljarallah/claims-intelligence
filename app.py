@@ -2,7 +2,6 @@ import os
 import io
 import streamlit as st
 import pandas as pd
-import pdfplumber
 import re
 import pdf2image
 import pytesseract
@@ -15,6 +14,7 @@ st.set_page_config(page_title="مرصد المطالبات التأمينية ا
 
 PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
+# يمكنك إنشاء 3 جداول في BigQuery أو جدول موحد بحسب رغبتك
 TABLE_ID = "monthly_performance"
 
 @st.cache_resource
@@ -35,9 +35,9 @@ def clean_number(val):
         return 0.0
 
 def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, current_premium):
-    monthly_data = []
-    benefit_data = []
-    providers_data = []
+    monthly_rows = []
+    benefit_rows = []
+    provider_rows = []
     
     raw_text = ""
     try:
@@ -52,22 +52,34 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
     if raw_text:
         lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
         current_section = "unknown"
+        current_policy_year = "2025-2026"
+        current_class_tier = "Standard / VIP"
         
         for idx, line in enumerate(lines):
             line_lower = line.lower()
             
-            # تحديد القسم الحالي بناءً على العناوين الظاهرة في التقرير
-            if "monthly claim" in line_lower or "الشهري" in line_lower:
+            # التقاط سنة الوثيقة أو الفئة إذا ظهرت في السطور
+            if "policy year" in line_lower or "سنة الوثيقة" in line_lower:
+                current_policy_year = line[:30]
+                continue
+            if "class" in line_lower or "tier" in line_lower or "vip" in line_lower:
+                current_class_tier = line[:30]
+                continue
+                
+            # تحديد الأقسام الرئيسية
+            if "monthly claim" in line_lower or "المطالبات الشهرية" in line_lower:
                 current_section = "monthly"
                 continue
             elif "breakdown by benefit" in line_lower or "التوزيع حسب المنفعة" in line_lower:
                 current_section = "benefit"
                 continue
-            elif "top 20" in line_lower or "utilised providers" in line_lower or "مزودي الخدمة" in line_lower:
+            elif "top 20" in line_lower or "utilised providers" in line_lower or "مزوّدي الخدمة" in line_lower:
                 current_section = "providers"
                 continue
             
-            # استخراج البيانات حسب القسم النشط
+            created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
+            
+            # 1. القسم الأول: Monthly Claims
             if current_section == "monthly":
                 date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', line)
                 if date_match:
@@ -76,85 +88,63 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                     else:
                         row_date = f"{date_match.group(3)}-{date_match.group(4).zfill(2)}"
                     
-                    nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line) if clean_number(n) > 0]
-                    claims_val = nums[-1] if nums else 0.0
-                    if claims_val > 0:
-                        monthly_data.append({
+                    nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line)]
+                    if nums:
+                        monthly_rows.append({
+                            "created_at": created_at_ts,
+                            "policy_year": current_policy_year,
+                            "table_header": file_name,
                             "month_code": row_date,
-                            "paid_claims": claims_val
+                            "class_tier": current_class_tier,
+                            "active_lives": int(total_members),
+                            "claims_count": int(nums[0]) if len(nums) > 4 else 0,
+                            "paid_claims_sar": float(nums[1]) if len(nums) > 4 else float(nums[-1]),
+                            "paid_claims_vat_sar": float(nums[2]) if len(nums) > 4 else 0.0,
+                            "OS_claims_count": int(nums[3]) if len(nums) > 4 else 0,
+                            "OS paid_claims_sar": float(nums[4]) if len(nums) > 5 else 0.0,
+                            "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 6 else 0.0,
+                            "section_type": "Monthly Claims"
                         })
-                        
+            
+            # 2. القسم الثاني: Breakdown by Benefit
             elif current_section == "benefit":
-                nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line) if clean_number(n) > 0]
-                if nums and len(line) > 3:
-                    benefit_data.append({
+                nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line)]
+                if nums and len(line) > 4:
+                    benefit_rows.append({
+                        "created_at": created_at_ts,
+                        "policy_year": current_policy_year,
+                        "table_header": file_name,
+                        "class_tier": current_class_tier,
                         "benefit_name": line[:40],
-                        "benefit_claims": nums[-1]
+                        "claims_count": int(nums[0]) if len(nums) > 2 else 0,
+                        "paid_claims_sar": float(nums[1]) if len(nums) > 2 else float(nums[-1]),
+                        "paid_claims_vat_sar": float(nums[2]) if len(nums) > 2 else 0.0,
+                        "section_type": "Breakdown by Benefit"
                     })
-                    
+            
+            # 3. القسم الثالث: Top 20 utilised providers
             elif current_section == "providers":
-                nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line) if clean_number(n) > 0]
-                if nums and len(line) > 3:
-                    providers_data.append({
+                nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line)]
+                if nums and len(line) > 4:
+                    provider_rows.append({
+                        "created_at": created_at_ts,
+                        "policy_year": current_policy_year,
+                        "table_header": file_name,
+                        "class_tier": current_class_tier,
                         "provider_name": line[:40],
-                        "provider_amount": nums[-1]
+                        "claims_count": int(nums[0]) if len(nums) > 2 else 0,
+                        "paid_claims_sar": float(nums[1]) if len(nums) > 2 else float(nums[-1]),
+                        "paid_claims_vat_sar": float(nums[2]) if len(nums) > 2 else 0.0,
+                        "section_type": "Top 20 Providers"
                     })
 
-    final_rows = []
-    
-    # 1. Monthly Claims
-    if monthly_data:
-        seen_months = set()
-        for item in monthly_data:
-            m = item["month_code"]
-            if m not in seen_months:
-                seen_months.add(m)
-                clm_val = item["paid_claims"]
-                final_rows.append({
-                    "tenant_id": str(tenant_id),
-                    "created_at": pd.Timestamp.now(tz='UTC').isoformat(),
-                    "source_file": file_name,
-                    "section_type": "Monthly Claims",
-                    "item_name": m,
-                    "active_lives": int(total_members),
-                    "annual_premium_sar": float(current_premium),
-                    "paid_claims_sar": float(clm_val),
-                    "loss_ratio_pct": float(round((clm_val / (current_premium / 12)) * 100, 2)) if current_premium > 0 else 0.0
-                })
-                
-    # 2. Breakdown by Benefit
-    for b in benefit_data:
-        final_rows.append({
-            "tenant_id": str(tenant_id),
-            "created_at": pd.Timestamp.now(tz='UTC').isoformat(),
-            "source_file": file_name,
-            "section_type": "Breakdown by Benefit",
-            "item_name": b["benefit_name"],
-            "active_lives": int(total_members),
-            "annual_premium_sar": float(current_premium),
-            "paid_claims_sar": float(b["benefit_claims"]),
-            "loss_ratio_pct": 0.0
-        })
-        
-    # 3. Top 20 Providers
-    for p in providers_data:
-        final_rows.append({
-            "tenant_id": str(tenant_id),
-            "created_at": pd.Timestamp.now(tz='UTC').isoformat(),
-            "source_file": file_name,
-            "section_type": "Top 20 Providers",
-            "item_name": p["provider_name"],
-            "active_lives": int(total_members),
-            "annual_premium_sar": float(current_premium),
-            "paid_claims_sar": float(p["provider_amount"]),
-            "loss_ratio_pct": 0.0
-        })
-    
-    return pd.DataFrame(final_rows)
+    # دمج كل الصفوف في هيكل موحد للـ Session أو إرجاعها
+    all_rows = monthly_rows + benefit_rows + provider_rows
+    return pd.DataFrame(all_rows)
 
-# واجهة المستخدم
-st.title("مرصد المطالبات التأمينية | التحليل الشامل للأقسام الثلاثة")
-st.markdown("منصة تحليل تقارير التأمين — استخراج المطالبات الشهرية، تفاصيل المنافع، وأبرز مقدمي الخدمة بدقة.")
+# واجهة Streamlit
+st.title("مرصد المطالبات التأمينية الذكي | الأقسام المتقدمة")
+st.markdown("استخراج تفصيلي دقيق للأقسام الثلاثة (Monthly Claims, Breakdown by Benefit, Top 20 Providers).")
 
 col_1, col_2 = st.columns(2)
 with col_1:
@@ -171,51 +161,43 @@ uploaded_file = st.file_uploader("رفع تقرير المطالبات الما�
 if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
-    if st.button("قراءة وتحليل الملف وتوليد الأقسام الثلاثة", type="primary"):
-        with st.spinner(f"جاري معالجة المستند لـ {company_name} وفصل الأقسام التأمينية..."):
+    if st.button("بدء المعالجة واستخراج الأقسام الثلاثة بدقة", type="primary"):
+        with st.spinner(f"جاري قراءة وتحليل المستند لـ {company_name}..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, tenant_id, total_members, current_premium)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
             if not df_actual.empty:
-                st.success(f"تمت قراءة المستند بنجاح وإنجاز التقسيم بنجاح ({len(df_actual)} سجل إجمالي)!")
+                st.success(f"تم بنجاح استخراج البيانات وتوزيعها على الأقسام ({len(df_actual)} سجل إجمالي)!")
             else:
-                st.warning("لم يتم العثور على بيانات مطابقة. تأكد من وضوح محتوى ملف الـ PDF.")
+                st.warning("لم يتم العثور على بيانات مطابقة. تأكد من تطابق محتوى الملف.")
 
     active_key = f"real_dash_{tenant_id}"
     if active_key in st.session_state and not st.session_state[active_key].empty:
         df_res = st.session_state[active_key]
         
-        # تقسيم الداتا إلى الأقسام الثلاثة
         df_monthly = df_res[df_res['section_type'] == 'Monthly Claims']
         df_benefit = df_res[df_res['section_type'] == 'Breakdown by Benefit']
         df_providers = df_res[df_res['section_type'] == 'Top 20 Providers']
         
         st.markdown("---")
-        st.subheader(f"📊 لوحة القرار التنفيذي للجهة: {company_name}")
+        st.subheader(f"📊 لوحة البيانات التشغيلية لـ: {company_name}")
         
-        # عرض الأقسام عبر تبويبات منفصلة (Tabs)
         tab1, tab2, tab3 = st.tabs([
-            "📅 1. المطالبات الشهرية", 
-            "🏥 2. التوزيع حسب المنفعة", 
-            "🏆 3. أعلى 20 مزود خدمة"
+            "📅 1. Monthly Claims", 
+            "🏥 2. Breakdown by Benefit", 
+            "🏆 3. Top 20 Providers"
         ])
         
         with tab1:
-            st.markdown("### القسم الأول: المطالبات الشهرية (Monthly Claims)")
-            total_monthly = df_monthly['paid_claims_sar'].sum() if not df_monthly.empty else 0.0
-            st.metric("إجمالي المطالبات الشهرية", f"{total_monthly:,.2f} SAR")
+            st.markdown("### القسم الأول: المطالبات الشهرية")
             st.dataframe(df_monthly, use_container_width=True)
             
         with tab2:
-            st.markdown("### القسم الثاني: التوزيع حسب المنفعة (Breakdown by Benefit)")
-            total_benefit = df_benefit['paid_claims_sar'].sum() if not df_benefit.empty else 0.0
-            st.metric("إجمالي مطالبات المنافع", f"{total_benefit:,.2f} SAR")
+            st.markdown("### القسم الثاني: التوزيع حسب المنفعة")
             st.dataframe(df_benefit, use_container_width=True)
             
         with tab3:
-            st.markdown("### القسم الثالث: أبرز مقدمي الخدمة (Top 20 Utilised Providers)")
-            total_prov = df_providers['paid_claims_sar'].sum() if not df_providers.empty else 0.0
-            st.metric("إجمالي مطالبات المزودين", f"{total_prov:,.2f} SAR")
+            st.markdown("### القسم الثالث: أبرز 20 مزود خدمة")
             st.dataframe(df_providers, use_container_width=True)
         
         st.markdown("---")
@@ -223,19 +205,6 @@ if uploaded_file:
         st.download_button(
             label="📥 تحميل التقرير الكامل للأقسام الثلاثة (CSV)",
             data=csv_export,
-            file_name=f"comprehensive_claims_{tenant_id}.csv",
+            file_name=f"structured_claims_{tenant_id}.csv",
             mime="text/csv",
         )
-        
-        if st.button("حفظ بيانات الأقسام الثلاثة في مستودع BigQuery المركزي", type="secondary"):
-            with st.spinner("جاري الضخ الآمن..."):
-                try:
-                    bq_client = get_bq_client()
-                    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
-                    errors = bq_client.insert_rows_json(table_ref, df_res.to_dict(orient="records"))
-                    if errors == []:
-                        st.success("تم حفظ جميع الأقسام بنجاح في المستودع المركزي!")
-                    else:
-                        st.error(f"خطأ في الحفظ: {errors}")
-                except Exception as e:
-                    st.error(f"فشل الاتصال بقاعدة البيانات: {str(e)}")
