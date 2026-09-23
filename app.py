@@ -195,16 +195,16 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (شامل لتسميات Maternity و Optical وغيرها بدقة)
+        # 2. القسم الثاني: Breakdown by Benefit (كشف مرن يتجاوز دمج النصوص)
         elif current_section == "benefit":
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
             if nums and len(row_text) > 4 and not any(w in line_lower for w in ['total', 'limit', 'coinsurance', 'الإجمالي']):
                 upper_text = row_text.upper()
                 benefit_label = None
                 
-                if "OUT" in upper_text or "OUT-PATIENT" in upper_text or ("BASIC" in upper_text and "OUT" in upper_text):
+                if "OUT" in upper_text or "OUT-PATIENT" in upper_text:
                     benefit_label = "Basic Coverage (Out-Patient)"
-                elif "IN" in upper_text or "IN-PATIENT" in upper_text or ("BASIC" in upper_text and "IN" in upper_text):
+                elif "IN" in upper_text or "IN-PATIENT" in upper_text:
                     benefit_label = "Basic Coverage (In-Patient)"
                 elif "DENTAL" in upper_text:
                     benefit_label = "Dental"
@@ -224,15 +224,17 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "created_at": created_at_ts,
                         "policy_year": current_policy_year or "LAST POLICY YEAR",
                         "table_header": file_name,
+                        "month_code": "Benefit Summary",
                         "class_tier": current_class_tier or "CLASS GENERAL",
-                        "benefit_name": benefit_label,
+                        "active_lives": total_members,
                         "claims_count": int(nums[0]) if len(nums) > 5 else 0,
                         "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
                         "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
                         "OS_claims_count": int(nums[3]) if len(nums) > 5 else 0,
                         "OS paid_claims_sar": float(nums[4]) if len(nums) > 5 else 0.0,
                         "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
-                        "section_type": "Breakdown by Benefit"
+                        "section_type": "Breakdown by Benefit",
+                        "benefit_name": benefit_label
                     })
         
         # 3. القسم الثالث: Top 20 utilised providers
@@ -243,15 +245,17 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     "created_at": created_at_ts,
                     "policy_year": current_policy_year or "LAST POLICY YEAR",
                     "table_header": file_name,
+                    "month_code": "Provider Summary",
                     "class_tier": current_class_tier or "CLASS GENERAL",
-                    "provider_name": row_text[:40].strip(),
+                    "active_lives": total_members,
                     "claims_count": int(nums[0]) if len(nums) > 5 else 0,
                     "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
                     "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
                     "OS_claims_count": int(nums[3]) if len(nums) > 5 else 0,
                     "OS paid_claims_sar": float(nums[4]) if len(nums) > 5 else 0.0,
                     "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
-                    "section_type": "Top 20 Providers"
+                    "section_type": "Top 20 Providers",
+                    "provider_name": row_text[:40].strip()
                 })
 
     all_rows = monthly_rows + benefit_rows + provider_rows
@@ -281,7 +285,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطبيق قواعد التصنيف المحدثة..."):
+        with st.spinner("جاري قراءة الملف وتطبيق محرك الكشف المرن للمنافع..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
@@ -323,7 +327,7 @@ if uploaded_file:
                 label="📥 تحميل التقرير الكامل بصيغة (CSV)",
                 data=csv_export,
                 file_name=f"claims_export_{tenant_id}.csv",
-                mime="text/css",
+                mime="text/csv",
                 use_container_width=True
             )
             
