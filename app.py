@@ -31,9 +31,9 @@ def clean_number(val):
     except Exception:
         return 0.0
 
-# محرك قراءة الملف الفعلي واستخراج الأرقام ديناميكياً 100% دون أي قيم مسبقة
+# محرك قراءة الملف الفعلي واستخراج الأرقام ديناميكياً بدقة
 def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, current_premium):
-    extracted_records = []
+    parsed_months_data = []
     raw_text = ""
     
     try:
@@ -43,55 +43,47 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                 if t:
                     raw_text += t + "\n"
                 
-                # استخراج الجداول الفعليّة إن وجدت في الصفحة
+                # استخراج الجداول الفعليّة مباشرة من الصفحة
                 tables = page.extract_tables()
                 for table in tables:
                     for row in table:
                         row_cells = [str(c).strip() for c in row if c is not None and str(c).strip() != '']
-                        if row_cells:
-                            # البحث عن الأشهر أو الأرقام داخل جداول الملف الحقيقي
-                            for cell in row_cells:
-                                date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', cell)
-                                if date_match:
-                                    extracted_records.endswith = True # مؤشر وجود بيانات حقيقية
+                        if not row_cells:
+                            continue
+                        
+                        # البحث عن الشهر ورقم المطالبة داخل نفس الصف الجدولى
+                        row_date = None
+                        row_claims = 0.0
+                        
+                        for cell in row_cells:
+                            date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', cell)
+                            if date_match and not row_date:
+                                if date_match.group(1) and date_match.group(2):
+                                    row_date = f"{date_match.group(1)}-{date_match.group(2).zfill(2)}"
+                                else:
+                                    row_date = f"{date_match.group(4)}-{date_match.group(3).zfill(2)}"
+                            
+                            # محاولة استخراج القيم المالية الكبيرة التي تمثل المطالبات
+                            num_val = clean_number(cell)
+                            if num_val > 100: # افتراض أن المطالبة تتجاوز المبالغ البسيطة
+                                row_claims = num_val
+                        
+                        if row_date and row_claims > 0:
+                            parsed_months_data.append({
+                                "month_code": row_date,
+                                "extracted_claims": row_claims
+                            })
     except Exception as e:
         st.error(f"خطأ في قراءة الملف الفعلي: {str(e)}")
 
-    # تحليل الأسطر النصية الحقيقية المستخرجة من المستند حصراً
-    lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
-    
-    parsed_months_data = []
-    for idx, line in enumerate(lines):
-        date_match = re.search(r'\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line)
-        if date_match:
-            if date_match.group(1) and date_match.group(2):
-                m_code = f"{date_match.group(1)}-{date_match.group(2).zfill(2)}"
-            else:
-                m_code = f"{date_match.group(4)}-{date_match.group(3).zfill(2)}"
-            
-            # استخراج الأرقام المجاورة للأسطر الفعلية في المستند
-            nums_in_context = []
-            for scan_idx in range(idx, min(idx + 5, len(lines))):
-                found_nums = re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', lines[scan_idx])
-                for num_str in found_nums:
-                    val = clean_number(num_str)
-                    if val > 0:
-                        nums_in_context.append(val)
-            
-            if nums_in_context:
-                parsed_months_data.append({
-                    "month_code": m_code,
-                    "extracted_claims": nums_in_context[0] if len(nums_in_context) > 0 else 0.0
-                })
-
-    # إذا استخرج النظام بيانات فعلية من الملف، نعتمدها؛ وإلا يتم تنبيه المستخدم لرفع ملف يحتوي على جداول واضحة
+    # بناء الجدول النهائي
     final_rows = []
     if parsed_months_data:
         seen_months = set()
         for item in parsed_months_data:
             m = item["month_code"]
             if m not in seen_months:
-                seen_months.add(m]
+                seen_months.add(m)  # تم تصحيح القوس هنا
                 clm_val = item["extracted_claims"]
                 final_rows.append({
                     "tenant_id": str(tenant_id),
@@ -104,20 +96,6 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                     "loss_ratio_pct": float(round((clm_val / (current_premium / 12)) * 100, 2)) if current_premium > 0 else 0.0
                 })
     
-    # إذا تعذر استخراج أسطر شهرية بصيغة رقمية بحتة من النص الخام، نقوم بإنشاء جدول يعرض النص الخام الحقيقي للمستند مع عدد الأعضاء والقسط المدخل لتجنب أي تضليل
-    if not final_rows:
-        for page_num, line in enumerate(lines[:12], start=1):
-            final_rows.append({
-                "tenant_id": str(tenant_id),
-                "created_at": pd.Timestamp.now(tz='UTC').isoformat(),
-                "source_file": file_name,
-                "month_code": f"Page-{page_num}",
-                "active_lives": int(total_members),
-                "annual_premium_sar": float(current_premium),
-                "paid_claims_sar": clean_number(line),
-                "loss_ratio_pct": 0.0
-            })
-
     return pd.DataFrame(final_rows)
 
 st.title("مرصد المطالبات التأمينية | التحليل الفعلي المستقل")
@@ -143,7 +121,10 @@ if uploaded_file:
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, tenant_id, total_members, current_premium)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
-            st.success("تمت قراءة المستند الفعلي وتوليد البيانات بناءً على محتوى الملف حصراً!")
+            if not df_actual.empty:
+                st.success(f"تمت قراءة المستند بنجاح واستخراج {len(df_actual)} سجل شهري!")
+            else:
+                st.warning("لم يتم العثور على جداول شهرية مطابقة. تأكد من أن ملف الـ PDF يحتوي على جدول ببيانات الأشهر والمطالبات.")
 
     active_key = f"real_dash_{tenant_id}"
     if active_key in st.session_state and not st.session_state[active_key].empty:
