@@ -36,55 +36,63 @@ def clean_number(val):
 
 def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, current_premium):
     parsed_months_data = []
+    raw_text = ""
     
+    # 1. بما أن الملف عبارة عن نسخة مسحوبة ضوئياً (Scanned Copy)، نبدأ مباشرة بتحويله لصور وتشغيل الـ OCR
     try:
-        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-            for page in pdf.pages:
-                tables = page.extract_tables()
-                for table in tables:
-                    for row in table:
-                        # تنظيف الخلايا وتجاهل القيم الفارغة
-                        row_cells = [str(c).strip() for c in row if c is not None and str(c).strip() != '']
-                        if not row_cells:
-                            continue
-                        
-                        row_date = None
-                        lives_val = int(total_members)
-                        claims_val = 0.0
-                        
-                        for cell in row_cells:
-                            # البحث عن صيغة الشهر والسنة مثل 11/2025 أو 01/2026
-                            date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', cell)
-                            if date_match and not row_date:
-                                if date_match.group(1) and date_match.group(2):
-                                    row_date = f"{date_match.group(2)}-{date_match.group(1).zfill(2)}"
-                                else:
-                                    row_date = f"{date_match.group(3)}-{date_match.group(4).zfill(2)}"
-                        
-                        # إذا وجدنا سطراً يحتوي على شهر، نقوم باستخراج الأرقام الرقمية المرتبطة به في نفس الصف
-                        if row_date:
-                            numeric_cells = [clean_number(c) for c in row_cells if clean_number(c) > 0]
-                            # عادة الأعمدة تكون: [الشهر, عدد المؤمنين, المطالبات الصافية، ...]
-                            if len(numeric_cells) >= 2:
-                                # محاولة تحديد عدد الأرواح والمطالبات بدقة بناءً على موقعها
-                                possible_lives = [n for n in numeric_cells if n < 10000] # الأعداد الصغيرة تمثل الموظفين غالباً
-                                possible_claims = [n for n in numeric_cells if n > 1000]  # الأعداد الكبيرة تمثل المبالغ
-                                
-                                if possible_lives:
-                                    lives_val = int(possible_lives[0])
-                                if possible_claims:
-                                    claims_val = possible_claims[0] # أول مبلغ كبير عادة هو Net Paid Claims
-                            
-                            if claims_val > 0:
-                                parsed_months_data.append({
-                                    "month_code": row_date,
-                                    "active_lives": lives_val,
-                                    "paid_claims": claims_val
-                                })
+        images = pdf2image.convert_from_bytes(file_bytes)
+        for img in images:
+            # استخدام اللغتين الإنجليزية والعربية لأن الجداول تحتوي على أرقام وتواريخ إنجليزية ومسميات
+            ocr_text = pytesseract.image_to_string(img, lang='eng+ara')
+            if ocr_text:
+                raw_text += ocr_text + "\n"
     except Exception as e:
-        st.error(f"خطأ أثناء قراءة الجدول من الملف: {str(e)}")
+        st.error(f"خطأ في تحويل وتشغيل الـ OCR على المستند: {str(e)}")
 
-    # بناء جدول البيانات النهائي المطابق تماماً لملف الـ PDF
+    # 2. تحليل النص المستخرج عبر الـ OCR للبحث عن صفوف الأشهر والمبالغ
+    if raw_text:
+        lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
+        for idx, line in enumerate(lines):
+            # البحث عن صيغ التواريخ الشهرية مثل MM/YYYY أو YYYY/MM (مثال: 11/2025 أو 01/2026)
+            date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', line)
+            
+            if date_match:
+                if date_match.group(1) and date_match.group(2):
+                    row_date = f"{date_match.group(2)}-{date_match.group(1).zfill(2)}"
+                else:
+                    row_date = f"{date_match.group(3)}-{date_match.group(4).zfill(2)}"
+                
+                # تجميع كافة الأرقام الموجودة في السطر والأسطر المجاورة له (بسبب تداخل مسح الـ OCR)
+                context_numbers = []
+                for scan_idx in range(max(0, idx - 1), min(len(lines), idx + 2)):
+                    found_nums = re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', lines[scan_idx])
+                    for num_str in found_nums:
+                        val = clean_number(num_str)
+                        if val > 0:
+                            context_numbers.append(val)
+                
+                # استخلاص الأعداد والمبالغ بحسب منطق الجدول
+                # الأعداد الصغيرة (أقل من 10000) عادة تمثل عدد الموظفين (Lives)
+                # الأعداد الكبيرة تمثل المطالبات (Paid Claims)
+                lives_val = int(total_members)
+                claims_val = 0.0
+                
+                possible_lives = [n for n in context_numbers if n < 10000 and n != int(row_date.split('-')[0]) and n != int(row_date.split('-')[1])]
+                possible_claims = [n for n in context_numbers if n > 1000] # المبالغ التأمينية عادة تتجاوز 1000 ريال
+                
+                if possible_lives:
+                    lives_val = int(possible_lives[0])
+                if possible_claims:
+                    claims_val = possible_claims[0] # أول مبلغ كبير يمثل المطالبات الصافية
+                
+                if row_date and claims_val > 0:
+                    parsed_months_data.append({
+                        "month_code": row_date,
+                        "active_lives": lives_val,
+                        "paid_claims": claims_val
+                    })
+
+    # 3. بناء جدول البيانات النهائي
     final_rows = []
     if parsed_months_data:
         seen_months = set()
