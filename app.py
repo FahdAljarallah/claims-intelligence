@@ -195,27 +195,38 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit
+        # 2. القسم الثاني: Breakdown by Benefit (مع تطبيق منطق التصنيف والترتيب حسب معايير SAMA)
         elif current_section == "benefit":
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
             if nums and len(row_text) > 4 and not any(w in line_lower for w in ['total', 'limit', 'coinsurance', 'الإجمالي']):
-                benefit_keywords = ['basic coverage', 'in-patient', 'out-patient', 'dental', 'optical', 'maternity']
-                found_benefit = "General Benefit"
-                for bk in benefit_keywords:
-                    if bk in line_lower:
-                        found_benefit = row_text[row_text.lower().index(bk):].split()[0:3]
-                        found_benefit = " ".join(found_benefit).strip(' .:-')
-                        break
+                upper_text = row_text.upper()
                 
-                if found_benefit == "General Benefit" and len(row_text) > 20:
-                    found_benefit = row_text[:30].strip(' .:-')
+                # تطبيق القواعد الشرطية الدقيقة لتسمية المنفعة
+                if "OUT" in upper_text:
+                    benefit_label = "Out Patient"
+                elif "IN" in upper_text:
+                    benefit_label = "In Patient"
+                elif "DENTAL" in upper_text:
+                    benefit_label = "Dental"
+                elif "MATERNITY" in upper_text:
+                    benefit_label = "Maternity"
+                elif "LAB" in upper_text:
+                    benefit_label = "Lab"
+                elif "CONSULATION" in upper_text or "CONSULTATION" in upper_text:
+                    benefit_label = "Consultation"
+                elif "PHARMACY" in upper_text or "MED" in upper_text:
+                    benefit_label = "Pharama/Med"
+                else:
+                    # التنظيف الاحتياطي في حال عدم مطابقة الكلمات المفتاحية الحرفية
+                    non_num_tokens = [t for t in row_tokens if not re.search(r'\d', t) and t.upper() not in ['CLASS', 'VIP', 'TYPE']]
+                    benefit_label = " ".join(non_num_tokens[:3]).strip(' .:-') if non_num_tokens else "General Benefit"
 
                 benefit_rows.append({
                     "created_at": created_at_ts,
                     "policy_year": current_policy_year or "LAST POLICY YEAR",
                     "table_header": file_name,
                     "class_tier": current_class_tier or "CLASS GENERAL",
-                    "benefit_name": found_benefit,
+                    "benefit_name": benefit_label,
                     "claims_count": int(nums[0]) if len(nums) > 5 else 0,
                     "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
                     "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
@@ -271,7 +282,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطبيق محرك الإحداثيات المكانية الذكي..."):
+        with st.spinner("جاري قراءة الملف وتطبيق قواعد التصنيف والترتيب..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
@@ -313,7 +324,7 @@ if uploaded_file:
                 label="📥 تحميل التقرير الكامل بصيغة (CSV)",
                 data=csv_export,
                 file_name=f"claims_export_{tenant_id}.csv",
-                mime="text/csv",
+                mime="text/css",
                 use_container_width=True
             )
             
