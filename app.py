@@ -195,30 +195,35 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (بدون أي استبعاد للتوينز أو الإجمالي، لتتمكن من فلترتها في BigQuery)
+        # 2. القسم الثاني: Breakdown by Benefit (عزل اسم الفئة وتصحيح مطابقة المنافع)
         elif current_section == "benefit":
+            cleaned_row_text = row_text
+            if current_class_tier and current_class_tier in cleaned_row_text:
+                cleaned_row_text = cleaned_row_text.replace(current_class_tier, "").strip()
+            
+            line_lower_clean = cleaned_row_text.lower()
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
+            
             if nums and len(row_text) > 4:
-                upper_text = row_text.upper()
                 benefit_label = "General Benefit"
                 
-                if "OUT" in upper_text or "OUT-PATIENT" in upper_text:
+                if "OUT" in line_lower_clean or "OUT-PATIENT" in line_lower_clean:
                     benefit_label = "Basic Coverage (Out-Patient)"
-                elif "IN" in upper_text or "IN-PATIENT" in upper_text:
+                elif "IN" in line_lower_clean or "IN-PATIENT" in line_lower_clean:
                     benefit_label = "Basic Coverage (In-Patient)"
-                elif "DENTAL" in upper_text:
+                elif "DENTAL" in line_lower_clean:
                     benefit_label = "Dental"
-                elif "OPTICAL" in upper_text:
+                elif "OPTICAL" in line_lower_clean:
                     benefit_label = "Optical"
-                elif "MAT" in upper_text:
+                elif "MATERNITY" in line_lower_clean or "MAT" in line_lower_clean:
                     benefit_label = "Maternity"
-                elif "LAB" in upper_text:
+                elif "LAB" in line_lower_clean:
                     benefit_label = "Lab"
-                elif "CONSULATION" in upper_text or "CONSULTATION" in upper_text:
+                elif "CONSULATION" in line_lower_clean or "CONSULTATION" in line_lower_clean:
                     benefit_label = "Consultation"
-                elif "PHARMACY" in upper_text or "MED" in upper_text:
+                elif "PHARMACY" in line_lower_clean or "MED" in line_lower_clean:
                     benefit_label = "Pharama/Med"
-                elif "TOTAL" in upper_text or "الإجمالي" in upper_text:
+                elif "TOTAL" in line_lower_clean or "الإجمالي" in line_lower_clean:
                     benefit_label = "Total"
                 
                 benefit_rows.append({
@@ -286,7 +291,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف والسماح بمرور كافة السطور..."):
+        with st.spinner("جاري قراءة الملف وعزل النصوص بدقة تامة..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
