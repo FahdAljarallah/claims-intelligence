@@ -239,22 +239,21 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     "benefit_name": benefit_label
                 })
         
-        # 3. القسم الثالث: Top 20 Providers (تصفية العناوين بالفراغات/الأصفار وعزل اسم المزود بدقة)
+        # 3. القسم الثالث: Top 20 Providers (عزل اسم المزود بذكاء وحماية الأعمدة العددية)
         elif current_section == "providers":
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
             
-            if not nums or len(nums) < 3 or "provider" in line_lower or "confidential" in line_lower:
+            if not nums or len(nums) < 3 or "provider" in line_lower or "confidential" in line_lower or "page" in line_lower:
                 continue
 
             non_num_tokens = []
             for t in row_tokens:
-                if not re.search(r'^\d+(\.\d+)?$', t):
-                    non_num_tokens.append(t)
-                else:
+                if t.replace(',', '').replace('.', '').isdigit() and len(t) > 1 and row_tokens.index(t) > 1:
                     break
+                non_num_tokens.append(t)
             
             prov_name = " ".join(non_num_tokens).strip(' .:-')
-            if not prov_name or len(prov_name) < 2:
+            if not prov_name or len(prov_name) < 2 or prov_name.isdigit():
                 prov_name = row_text[:40].strip()
 
             provider_rows.append({
@@ -299,7 +298,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطهير السجلات بدقة متناهية..."):
+        with st.spinner("جاري قراءة الملف وتطهير صفوف المزودين والأعمدة بدقة..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
