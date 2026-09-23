@@ -195,16 +195,12 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (منع ضياع الماترينتي عند تداخل الـ OCR مع سطر الإجمالي)
+        # 2. القسم الثاني: Breakdown by Benefit (بدون أي استبعاد للتوينز أو الإجمالي، لتتمكن من فلترتها في BigQuery)
         elif current_section == "benefit":
-            # استبعاد صفوف الإجمالي الخالصة فقط وعدم استبعاد السطور التي تحتوي على منافع حقيقية
-            if re.search(r'\b(total|الإجمالي)\b', line_lower) and not any(b in line_lower for b in ['out', 'in', 'dental', 'optical', 'mat', 'lab', 'consultation', 'pharmacy', 'med']):
-                continue
-
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
-            if nums and len(row_text) > 4 and not any(w in line_lower for w in ['limit', 'coinsurance']):
+            if nums and len(row_text) > 4:
                 upper_text = row_text.upper()
-                benefit_label = None
+                benefit_label = "General Benefit"
                 
                 if "OUT" in upper_text or "OUT-PATIENT" in upper_text:
                     benefit_label = "Basic Coverage (Out-Patient)"
@@ -222,31 +218,30 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     benefit_label = "Consultation"
                 elif "PHARMACY" in upper_text or "MED" in upper_text:
                     benefit_label = "Pharama/Med"
+                elif "TOTAL" in upper_text or "الإجمالي" in upper_text:
+                    benefit_label = "Total"
                 
-                if benefit_label:
-                    benefit_rows.append({
-                        "created_at": created_at_ts,
-                        "policy_year": current_policy_year or "LAST POLICY YEAR",
-                        "table_header": file_name,
-                        "month_code": "Benefit Summary",
-                        "class_tier": current_class_tier or "CLASS GENERAL",
-                        "active_lives": 0,
-                        "claims_count": int(nums[0]) if len(nums) > 5 else 0,
-                        "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
-                        "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
-                        "OS_claims_count": int(nums[3]) if len(nums) > 5 else 0,
-                        "OS paid_claims_sar": float(nums[4]) if len(nums) > 4 else 0.0,
-                        "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
-                        "section_type": "Breakdown by Benefit",
-                        "benefit_name": benefit_label
-                    })
+                benefit_rows.append({
+                    "created_at": created_at_ts,
+                    "policy_year": current_policy_year or "LAST POLICY YEAR",
+                    "table_header": file_name,
+                    "month_code": "Benefit Summary",
+                    "class_tier": current_class_tier or "CLASS GENERAL",
+                    "active_lives": 0,
+                    "claims_count": int(nums[0]) if len(nums) > 5 else 0,
+                    "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
+                    "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
+                    "OS_claims_count": int(nums[3]) if len(nums) > 5 else 0,
+                    "OS paid_claims_sar": float(nums[4]) if len(nums) > 4 else 0.0,
+                    "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
+                    "section_type": "Breakdown by Benefit",
+                    "benefit_name": benefit_label
+                })
         
         # 3. القسم الثالث: Top 20 utilised providers
         elif current_section == "providers":
-            if re.search(r'\b(total|الإجمالي)\b', line_lower):
-                continue
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
-            if nums and len(row_text) > 4 and not any(w in line_lower for w in ['provider']):
+            if nums and len(row_text) > 4:
                 provider_rows.append({
                     "created_at": created_at_ts,
                     "policy_year": current_policy_year or "LAST POLICY YEAR",
@@ -291,7 +286,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطبيق معالجة صفوف الإجمالي..."):
+        with st.spinner("جاري قراءة الملف والسماح بمرور كافة السطور..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
@@ -333,7 +328,7 @@ if uploaded_file:
                 label="📥 تحميل التقرير الكامل بصيغة (CSV)",
                 data=csv_export,
                 file_name=f"claims_export_{tenant_id}.csv",
-                mime="text/csv",
+                mime="text/css",
                 use_container_width=True
             )
             
