@@ -195,7 +195,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (تصحيح Active Lives لتكون 0 ومعالجة Maternity بدقة)
+        # 2. القسم الثاني: Breakdown by Benefit (مطابقة مرنة وشاملة)
         elif current_section == "benefit":
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
             if nums and len(row_text) > 4 and not any(w in line_lower for w in ['total', 'limit', 'coinsurance', 'الإجمالي']):
@@ -210,7 +210,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     benefit_label = "Dental"
                 elif "OPTICAL" in upper_text:
                     benefit_label = "Optical"
-                elif ("MATERNITY" in upper_text or "MAT" in upper_text) and "WITHOUT" not in upper_text:
+                elif "MAT" in upper_text:
                     benefit_label = "Maternity"
                 elif "LAB" in upper_text:
                     benefit_label = "Lab"
@@ -226,7 +226,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "table_header": file_name,
                         "month_code": "Benefit Summary",
                         "class_tier": current_class_tier or "CLASS GENERAL",
-                        "active_lives": 0,  # جدول المنافع لا يحتوي على عمود للموظفين المؤمن عليهم
+                        "active_lives": 0,
                         "claims_count": int(nums[0]) if len(nums) > 5 else 0,
                         "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
                         "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
@@ -285,7 +285,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطبيق قواعد التصنيف المحدثة..."):
+        with st.spinner("جاري قراءة الملف وتطبيق مطابقة الكلمات الجذرية..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
