@@ -195,13 +195,13 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (مع تطبيق منطق التصنيف والترتيب حسب معايير SAMA)
+        # 2. القسم الثاني: Breakdown by Benefit (تصنيف صارم واستبعاد الصفوف المدمجة غير المطابقة)
         elif current_section == "benefit":
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
             if nums and len(row_text) > 4 and not any(w in line_lower for w in ['total', 'limit', 'coinsurance', 'الإجمالي']):
                 upper_text = row_text.upper()
+                benefit_label = None
                 
-                # تطبيق القواعد الشرطية الدقيقة لتسمية المنفعة
                 if "OUT" in upper_text:
                     benefit_label = "Out Patient"
                 elif "IN" in upper_text:
@@ -216,25 +216,22 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     benefit_label = "Consultation"
                 elif "PHARMACY" in upper_text or "MED" in upper_text:
                     benefit_label = "Pharama/Med"
-                else:
-                    # التنظيف الاحتياطي في حال عدم مطابقة الكلمات المفتاحية الحرفية
-                    non_num_tokens = [t for t in row_tokens if not re.search(r'\d', t) and t.upper() not in ['CLASS', 'VIP', 'TYPE']]
-                    benefit_label = " ".join(non_num_tokens[:3]).strip(' .:-') if non_num_tokens else "General Benefit"
-
-                benefit_rows.append({
-                    "created_at": created_at_ts,
-                    "policy_year": current_policy_year or "LAST POLICY YEAR",
-                    "table_header": file_name,
-                    "class_tier": current_class_tier or "CLASS GENERAL",
-                    "benefit_name": benefit_label,
-                    "claims_count": int(nums[0]) if len(nums) > 5 else 0,
-                    "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
-                    "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
-                    "OS_claims_count": int(nums[3]) if len(nums) > 5 else 0,
-                    "OS paid_claims_sar": float(nums[4]) if len(nums) > 5 else 0.0,
-                    "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
-                    "section_type": "Breakdown by Benefit"
-                })
+                
+                if benefit_label:
+                    benefit_rows.append({
+                        "created_at": created_at_ts,
+                        "policy_year": current_policy_year or "LAST POLICY YEAR",
+                        "table_header": file_name,
+                        "class_tier": current_class_tier or "CLASS GENERAL",
+                        "benefit_name": benefit_label,
+                        "claims_count": int(nums[0]) if len(nums) > 5 else 0,
+                        "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
+                        "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
+                        "OS_claims_count": int(nums[3]) if len(nums) > 5 else 0,
+                        "OS paid_claims_sar": float(nums[4]) if len(nums) > 5 else 0.0,
+                        "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
+                        "section_type": "Breakdown by Benefit"
+                    })
         
         # 3. القسم الثالث: Top 20 utilised providers
         elif current_section == "providers":
@@ -282,7 +279,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطبيق قواعد التصنيف والترتيب..."):
+        with st.spinner("جاري قراءة الملف وتطبيق قواعد التصنيف الصارمة..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
