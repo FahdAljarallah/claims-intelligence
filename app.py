@@ -70,9 +70,9 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                 continue
                 
             # تحديد الأقسام الرئيسية
-            if any(k in line_lower for k in ["monthly claim", "number of lives", "المطالبات الشهرية"]):
+            if any(k in line_lower for k in ["monthly claim", "number of lives at start", "المطالبات الشهرية"]):
                 current_section = "monthly"
-                continue
+                # لا نعمل continue هنا لنسمح بالتقاط سطر Number of lives at start إذا كان موجوداً ضمن هذا القسم
             elif any(k in line_lower for k in ["breakdown by benefit", "التوزيع حسب المنفعة"]):
                 current_section = "benefit"
                 continue
@@ -84,6 +84,27 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
             
             # 1. القسم الأول: Monthly Claims
             if current_section == "monthly":
+                # معالجة سطر Number of lives at start وتصفير الأعمدة التابعة له
+                if "number of lives at start" in line_lower:
+                    nums_lives = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line)]
+                    lives_val = int(nums_lives[0]) if nums_lives else int(total_members)
+                    monthly_rows.append({
+                        "created_at": created_at_ts,
+                        "policy_year": current_policy_year,
+                        "table_header": file_name,
+                        "month_code": "Number of lives at start",
+                        "class_tier": current_class_tier,
+                        "active_lives": lives_val,
+                        "claims_count": 0,
+                        "paid_claims_sar": 0.0,
+                        "paid_claims_vat_sar": 0.0,
+                        "OS_claims_count": 0,
+                        "OS paid_claims_sar": 0.0,
+                        "OS paid_claims_vat_sar": 0.0,
+                        "section_type": "Monthly Claims"
+                    })
+                    continue
+
                 date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', line)
                 if date_match:
                     if date_match.group(1) and date_match.group(2):
@@ -94,7 +115,6 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                         row_date = f"{y_val}-{str(m_val).zfill(2)}"
                     
                     all_nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line)]
-                    # استبعاد أرقام التاريخ ديناميكياً لتجنب أي زحزحة في الأعمدة
                     nums = [n for n in all_nums if n != m_val and n != y_val]
                     
                     if nums:
@@ -114,7 +134,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                             "section_type": "Monthly Claims"
                         })
             
-            # 2. القسم الثاني: Breakdown by Benefit (مع دعم أعمدة الـ OS)
+            # 2. القسم الثاني: Breakdown by Benefit
             elif current_section == "benefit":
                 nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line)]
                 if nums and len(line) > 4 and not any(w in line_lower for w in ['total', 'limit', 'coinsurance', 'الإجمالي']):
@@ -133,7 +153,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                         "section_type": "Breakdown by Benefit"
                     })
             
-            # 3. القسم الثالث: Top 20 utilised providers (مع توريث الفئة وتفعيل الـ OS)
+            # 3. القسم الثالث: Top 20 utilised providers
             elif current_section == "providers":
                 nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line)]
                 if nums and len(line) > 4 and not any(w in line_lower for w in ['total', 'provider', 'الإجمالي']):
@@ -141,7 +161,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                         "created_at": created_at_ts,
                         "policy_year": current_policy_year,
                         "table_header": file_name,
-                        "class_tier": current_class_tier,  # توريث تلقائي للفئة إن لم تذكر صراحة
+                        "class_tier": current_class_tier,
                         "provider_name": line[:40],
                         "claims_count": int(nums[0]) if len(nums) > 5 else 0,
                         "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
@@ -155,9 +175,9 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
     all_rows = monthly_rows + benefit_rows + provider_rows
     return pd.DataFrame(all_rows)
 
-# واجهة Streamlit (معاينة، تحميل، وضخ مباشر لـ BigQuery)
+# واجهة Streamlit
 st.title("مرصد المطالبات التأمينية | المعاينة والربط الذكي")
-st.markdown("استخراج الأقسام الثلاثة مع المعالجة الديناميكية الكاملة والجاهزة للربط مع BigQuery و Looker Studio.")
+st.markdown("استخراج الأقسام الثلاثة مع صف (Number of lives at start) والربط المباشر مع BigQuery.")
 
 col_1, col_2 = st.columns(2)
 with col_1:
