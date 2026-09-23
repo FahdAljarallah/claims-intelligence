@@ -62,15 +62,14 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                 current_policy_year = "LAST POLICY YEAR"
                 continue
                 
-            # التقاط اسم الفئة (حتى لو امتد لسطرين أو تضمن تفاصيل طويلة)
+            # التقاط اسم الفئة (مع دعم الأسطر الطويلة والممتدة)
             if "class" in line_lower or "tier" in line_lower or "vip" in line_lower or "الفئة" in line_lower:
                 clean_class = re.sub(r'(class\s*type|class\s*tier|class|الفئة[:\s]*)', '', line, flags=re.IGNORECASE).strip()
                 if clean_class:
                     current_class_tier = clean_class
                 continue
             elif current_class_tier and not any(k in line_lower for k in ["monthly claim", "breakdown", "top 20", "limit", "coinsurance"]) and len(line) > 5 and not re.search(r'\b(20\d{2})\b', line):
-                # إذا كان السطر مكملاً لاسم الفئة الطويل
-                if "female" in line_lower or "male" in line_lower or "employee" in line_lower or "without" in line_lower:
+                if any(w in line_lower for w in ["female", "male", "employee", "without", "maternity", "divorced"]):
                     current_class_tier += " " + line.strip()
                     continue
                 
@@ -119,6 +118,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                         row_date = f"{y_val}-{str(m_val).zfill(2)}"
                     
                     all_nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line)]
+                    # تصفية أرقام التاريخ ديناميكياً لتجنب أي إزاحة في الأعمدة
                     nums = [n for n in all_nums if n != m_val and n != y_val]
                     
                     if nums:
@@ -181,7 +181,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
 
 # واجهة Streamlit
 st.title("مرصد المطالبات التأمينية | المعاينة والربط الذكي")
-st.markdown("استخراج الأقسام الثلاثة مع صف (Number of lives at start) والربط المباشر مع BigQuery.")
+st.markdown("استخراج الأقسام الثلاثة مع مطابقة الأعمدة بدقة للتقارير متعددة الفئات والربط مع BigQuery.")
 
 col_1, col_2 = st.columns(2)
 with col_1:
