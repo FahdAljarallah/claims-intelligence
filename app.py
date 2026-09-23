@@ -62,7 +62,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                 current_policy_year = "LAST POLICY YEAR"
                 continue
                 
-            # تنظيف واستخراج قيمة الفئة فقط (Class Tier) بدون التسمية
+            # تنظيف واستخراج قيمة الفئة (Class Tier) ديناميكياً بدون التسمية
             if "class" in line_lower or "tier" in line_lower or "vip" in line_lower or "الفئة" in line_lower:
                 clean_class = re.sub(r'(class\s*type|class\s*tier|class|الفئة[:\s]*)', '', line, flags=re.IGNORECASE).strip()
                 if clean_class:
@@ -82,7 +82,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
             
             created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
             
-            # 1. القسم الأول: Monthly Claims (مع عزل أرقام التاريخ وتثبيت محاذاة الأعمدة)
+            # 1. القسم الأول: Monthly Claims
             if current_section == "monthly":
                 date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', line)
                 if date_match:
@@ -93,11 +93,9 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                         y_val, m_val = int(date_match.group(3)), int(date_match.group(4))
                         row_date = f"{y_val}-{str(m_val).zfill(2)}"
                     
-                    # استخراج جميع الأرقام من السطر
                     all_nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line)]
-                    
-                    # تصفية أرقام التاريخ (الشهر والسنة) لكي لا تتسبب في زحزحة الأعمدة
-                    nums = [n for n in all_nums if n != m_val and n != y_val and n != 2025 and n != 2026]
+                    # استبعاد أرقام التاريخ ديناميكياً لتجنب أي زحزحة في الأعمدة
+                    nums = [n for n in all_nums if n != m_val and n != y_val]
                     
                     if nums:
                         monthly_rows.append({
@@ -116,14 +114,50 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                             "section_type": "Monthly Claims"
                         })
             
-            # (سيتم استكمال القسمين الثاني والثالث تباعاً بناءً على موافقتك)
+            # 2. القسم الثاني: Breakdown by Benefit (مع دعم أعمدة الـ OS)
+            elif current_section == "benefit":
+                nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line)]
+                if nums and len(line) > 4 and not any(w in line_lower for w in ['total', 'limit', 'coinsurance', 'الإجمالي']):
+                    benefit_rows.append({
+                        "created_at": created_at_ts,
+                        "policy_year": current_policy_year,
+                        "table_header": file_name,
+                        "class_tier": current_class_tier,
+                        "benefit_name": line[:40],
+                        "claims_count": int(nums[0]) if len(nums) > 5 else 0,
+                        "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
+                        "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
+                        "OS_claims_count": int(nums[3]) if len(nums) > 5 else 0,
+                        "OS paid_claims_sar": float(nums[4]) if len(nums) > 5 else 0.0,
+                        "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
+                        "section_type": "Breakdown by Benefit"
+                    })
             
+            # 3. القسم الثالث: Top 20 utilised providers (مع توريث الفئة وتفعيل الـ OS)
+            elif current_section == "providers":
+                nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line)]
+                if nums and len(line) > 4 and not any(w in line_lower for w in ['total', 'provider', 'الإجمالي']):
+                    provider_rows.append({
+                        "created_at": created_at_ts,
+                        "policy_year": current_policy_year,
+                        "table_header": file_name,
+                        "class_tier": current_class_tier,  # توريث تلقائي للفئة إن لم تذكر صراحة
+                        "provider_name": line[:40],
+                        "claims_count": int(nums[0]) if len(nums) > 5 else 0,
+                        "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
+                        "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
+                        "OS_claims_count": int(nums[3]) if len(nums) > 5 else 0,
+                        "OS paid_claims_sar": float(nums[4]) if len(nums) > 5 else 0.0,
+                        "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
+                        "section_type": "Top 20 Providers"
+                    })
+
     all_rows = monthly_rows + benefit_rows + provider_rows
     return pd.DataFrame(all_rows)
 
-# واجهة الاستخدام (معاينة وتحميل وضخ لـ BigQuery)
+# واجهة Streamlit (معاينة، تحميل، وضخ مباشر لـ BigQuery)
 st.title("مرصد المطالبات التأمينية | المعاينة والربط الذكي")
-st.markdown("استخراج الأقسام الثلاثة مع مرونة كاملة في التعامل مع اختلاف مسميات رؤوس الجداول بين شركات التأمين.")
+st.markdown("استخراج الأقسام الثلاثة مع المعالجة الديناميكية الكاملة والجاهزة للربط مع BigQuery و Looker Studio.")
 
 col_1, col_2 = st.columns(2)
 with col_1:
