@@ -92,16 +92,13 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
         row_text = " ".join(row_tokens)
         line_lower = row_text.lower()
         
-        # تجاهل نصوص سرية التقرير
         if "confidential" in line_lower:
             continue
             
-        # التقاط سنة الوثيقة ديناميكياً
         if "policy year" in line_lower or "last policy year" in line_lower or "سنة الوثيقة" in line_lower:
             current_policy_year = row_text.strip()
             continue
             
-        # التقاط اسم الفئة وتحديثه باستمرار
         if "class" in line_lower or "tier" in line_lower or "الفئة" in line_lower:
             clean_class = re.sub(r'(class\s*type|class\s*tier|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
@@ -121,7 +118,6 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                 current_class_tier = current_class_tier + " " + row_text.strip()
                 continue
             
-        # تحديد الأقسام الرئيسية
         if any(k in line_lower for k in ["monthly claim", "number of lives at start", "المطالبات الشهرية"]):
             current_section = "monthly"
         elif any(k in line_lower for k in ["breakdown by benefit", "التوزيع حسب المنفعة"]):
@@ -243,11 +239,10 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     "benefit_name": benefit_label
                 })
         
-        # 3. القسم الثالث: Top 20 Providers (مع اعتماد اسم الفئة الحالي تلقائياً)
+        # 3. القسم الثالث: Top 20 Providers (مع حماية مؤشرات القراءة الآمنة)
         elif current_section == "providers":
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
             if nums and len(row_text) > 4 and "provider" not in line_lower:
-                # عزل اسم المزود عن الأرقام المالية
                 non_num_tokens = [t for t in row_tokens if not re.search(r'\d', t) and t.lower() not in ['confidential', 'page']]
                 prov_name = " ".join(non_num_tokens).strip(' .:-')
                 if not prov_name:
@@ -258,10 +253,10 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     "policy_year": current_policy_year or "LAST POLICY YEAR",
                     "table_header": file_name,
                     "class_tier": current_class_tier or "CLASS GENERAL",
-                    "claims_count": int(nums[0]),
-                    "paid_claims_sar": float(nums[1]),
-                    "paid_claims_vat_sar": float(nums[2]),
-                    "OS_claims_count": int(nums[3]),
+                    "claims_count": int(nums[0]) if len(nums) > 0 else 0,
+                    "paid_claims_sar": float(nums[1]) if len(nums) > 1 else 0.0,
+                    "paid_claims_vat_sar": float(nums[2]) if len(nums) > 2 else 0.0,
+                    "OS_claims_count": int(nums[3]) if len(nums) > 3 else 0,
                     "OS paid_claims_sar": float(nums[4]) if len(nums) > 4 else 0.0,
                     "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
                     "section_type": "Top 20 Providers",
@@ -295,7 +290,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتوريث اسم الفئة بدقة للأقسام التالية..."):
+        with st.spinner("جاري قراءة الملف وتطبيق معالجة الفهارس الآمنة..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
