@@ -92,12 +92,16 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
         row_text = " ".join(row_tokens)
         line_lower = row_text.lower()
         
+        # تجاهل نصوص سرية التقرير
+        if "confidential" in line_lower:
+            continue
+            
         # التقاط سنة الوثيقة ديناميكياً
         if "policy year" in line_lower or "last policy year" in line_lower or "سنة الوثيقة" in line_lower:
             current_policy_year = row_text.strip()
             continue
             
-        # التقاط اسم الفئة بالكامل ودون نقاط زائدة
+        # التقاط اسم الفئة وتحديثه باستمرار
         if "class" in line_lower or "tier" in line_lower or "الفئة" in line_lower:
             clean_class = re.sub(r'(class\s*type|class\s*tier|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
@@ -108,12 +112,11 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                 if match_class_full:
                     clean_class = match_class_full.group(1).strip()
             
-            if clean_class:
+            if clean_class and "confidential" not in clean_class.lower():
                 clean_class = re.sub(r'\.$', '', clean_class)
                 current_class_tier = clean_class
             continue
         elif current_class_tier and not any(k in line_lower for k in ["monthly claim", "breakdown", "top 20", "limit", "coinsurance"]) and len(row_text) > 5 and not re.search(r'\b(20\d{2})\b', row_text):
-            # تم إزالة "maternity" من هنا لمنع اعتراض صفوف الأمومة وابتلاعها داخل اسم الفئة
             if any(w in line_lower for w in ["female", "male", "employee", "without", "divorced"]):
                 current_class_tier = current_class_tier + " " + row_text.strip()
                 continue
@@ -196,7 +199,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (عزل سليم تماماً لصفوف المنافع)
+        # 2. القسم الثاني: Breakdown by Benefit
         elif current_section == "benefit":
             benefit_label = None
             line_full_lower = row_text.lower()
@@ -240,25 +243,29 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     "benefit_name": benefit_label
                 })
         
-        # 3. القسم الثالث: Top 20 utilised providers
+        # 3. القسم الثالث: Top 20 Providers (مع اعتماد اسم الفئة الحالي تلقائياً)
         elif current_section == "providers":
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
-            if nums and len(row_text) > 4:
+            if nums and len(row_text) > 4 and "provider" not in line_lower:
+                # عزل اسم المزود عن الأرقام المالية
+                non_num_tokens = [t for t in row_tokens if not re.search(r'\d', t) and t.lower() not in ['confidential', 'page']]
+                prov_name = " ".join(non_num_tokens).strip(' .:-')
+                if not prov_name:
+                    prov_name = row_text[:40].strip()
+
                 provider_rows.append({
                     "created_at": created_at_ts,
                     "policy_year": current_policy_year or "LAST POLICY YEAR",
                     "table_header": file_name,
-                    "month_code": "Provider Summary",
                     "class_tier": current_class_tier or "CLASS GENERAL",
-                    "active_lives": 0,
-                    "claims_count": int(nums[0]) if len(nums) > 5 else 0,
-                    "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
-                    "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
-                    "OS_claims_count": int(nums[3]) if len(nums) > 5 else 0,
+                    "claims_count": int(nums[0]),
+                    "paid_claims_sar": float(nums[1]),
+                    "paid_claims_vat_sar": float(nums[2]),
+                    "OS_claims_count": int(nums[3]),
                     "OS paid_claims_sar": float(nums[4]) if len(nums) > 4 else 0.0,
                     "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
                     "section_type": "Top 20 Providers",
-                    "provider_name": row_text[:40].strip()
+                    "provider_name": prov_name
                 })
 
     all_rows = monthly_rows + benefit_rows + provider_rows
@@ -288,7 +295,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطهير الفئات من صفوف الأمومة..."):
+        with st.spinner("جاري قراءة الملف وتوريث اسم الفئة بدقة للأقسام التالية..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
