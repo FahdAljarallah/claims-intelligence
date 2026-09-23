@@ -195,32 +195,28 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (معالجة ذكية ومستقلة لصفوف المنافع وتداخلات الأسماء)
+        # 2. القسم الثاني: Breakdown by Benefit (معالجة فائقة المرونة للأسطر المدمجة)
         elif current_section == "benefit":
-            cleaned_row_text = row_text
-            if current_class_tier and current_class_tier in cleaned_row_text:
-                cleaned_row_text = cleaned_row_text.replace(current_class_tier, "").strip()
-            
-            line_lower_clean = cleaned_row_text.lower()
-            
             benefit_label = None
-            if "out" in line_lower_clean or "out-patient" in line_lower_clean:
-                benefit_label = "Basic Coverage (Out-Patient)"
-            elif "in" in line_lower_clean or "in-patient" in line_lower_clean:
-                benefit_label = "Basic Coverage (In-Patient)"
-            elif "dental" in line_lower_clean:
-                benefit_label = "Dental"
-            elif "optical" in line_lower_clean:
-                benefit_label = "Optical"
-            elif "mat" in line_lower_clean or "maternity" in line_lower_clean:
+            line_full_lower = row_text.lower()
+            
+            if "mat" in line_full_lower or "maternity" in line_full_lower:
                 benefit_label = "Maternity"
-            elif "lab" in line_lower_clean:
+            elif "out" in line_full_lower or "out-patient" in line_full_lower:
+                benefit_label = "Basic Coverage (Out-Patient)"
+            elif "in" in line_full_lower or "in-patient" in line_full_lower:
+                benefit_label = "Basic Coverage (In-Patient)"
+            elif "dental" in line_full_lower:
+                benefit_label = "Dental"
+            elif "optical" in line_full_lower:
+                benefit_label = "Optical"
+            elif "lab" in line_full_lower:
                 benefit_label = "Lab"
-            elif "consultation" in line_lower_clean or "consulation" in line_lower_clean:
+            elif "consultation" in line_full_lower or "consulation" in line_full_lower:
                 benefit_label = "Consultation"
-            elif "pharmacy" in line_lower_clean or "med" in line_lower_clean:
+            elif "pharmacy" in line_full_lower or "med" in line_full_lower:
                 benefit_label = "Pharama/Med"
-            elif "total" in line_lower_clean or "الإجمالي" in line_lower_clean:
+            elif "total" in line_full_lower or "الإجمالي" in line_full_lower:
                 benefit_label = "Total"
 
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
@@ -291,7 +287,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطبيق فحص المنافع الذكي..."):
+        with st.spinner("جاري قراءة الملف وتطبيق الفصل الذكي للأسطر المدمجة..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
@@ -333,7 +329,7 @@ if uploaded_file:
                 label="📥 تحميل التقرير الكامل بصيغة (CSV)",
                 data=csv_export,
                 file_name=f"claims_export_{tenant_id}.csv",
-                mime="text/css",
+                mime="text/csv",
                 use_container_width=True
             )
             
