@@ -45,7 +45,6 @@ def extract_structured_rows_from_image(img):
                 'text': text
             })
     
-    # فرز الكلمات حسب الموقع العمودي ثم الأفقي لتكوين الصفوف بدقة
     words = sorted(words, key=lambda w: (w['top'], w['left']))
     rows = []
     current_row = []
@@ -85,8 +84,8 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
         return pd.DataFrame()
 
     current_section = "unknown"
-    current_policy_year = "LAST POLICY YEAR"
-    current_class_tier = "CLASS VIP"
+    current_policy_year = ""
+    current_class_tier = ""
     
     for row in all_structured_rows:
         row_tokens = [w['text'] for w in row]
@@ -95,10 +94,10 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
         
         # التقاط سنة الوثيقة ديناميكياً
         if "policy year" in line_lower or "last policy year" in line_lower or "سنة الوثيقة" in line_lower:
-            current_policy_year = "LAST POLICY YEAR"
+            current_policy_year = row_text.strip()
             continue
             
-        # التقاط اسم الفئة بحرفيته الكاملة ودون أي حذف أو تعديل
+        # التقاط اسم الفئة ديناميكياً بحرفيتها
         if "class" in line_lower or "tier" in line_lower or "vip" in line_lower or "الفئة" in line_lower:
             clean_class = re.sub(r'(class\s*type|class\s*tier|class|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
@@ -130,10 +129,10 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                 lives_val = int(nums_lives[0]) if nums_lives else int(total_members)
                 monthly_rows.append({
                     "created_at": created_at_ts,
-                    "policy_year": current_policy_year,
+                    "policy_year": current_policy_year or "LAST POLICY YEAR",
                     "table_header": file_name,
                     "month_code": "Number of lives at start",
-                    "class_tier": current_class_tier,
+                    "class_tier": current_class_tier or "CLASS VIP",
                     "active_lives": lives_val,
                     "claims_count": 0,
                     "paid_claims_sar": 0.0,
@@ -154,12 +153,18 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     y_val, m_val = int(date_match.group(3)), int(date_match.group(4))
                     row_date = f"{y_val}-{str(m_val).zfill(2)}"
                 
-                # استخراج الأقمة مرتبة أفقياً تماماً كما تظهر في الـ PDF من اليسار لليمين
-                all_nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
-                nums = [n for n in all_nums if n != m_val and n != y_val]
+                # استبعاد توكن التاريخ نفسه حصراً من التوكنات لضمان عدم حذف أي أرقام تشابه رقم الشهر
+                filtered_tokens = []
+                date_excluded = False
+                for t in row_tokens:
+                    if not date_excluded and re.search(r'\b(0?[1-9]|1[0-2])[\/\-]20\d{2}\b|\b20\d{2}[\/\-](0?[1-9]|1[0-2])\b', t):
+                        date_excluded = True
+                        continue
+                    filtered_tokens.append(t)
+                
+                nums = [clean_number(t) for t in filtered_tokens if re.search(r'\d', t)]
                 
                 if nums:
-                    # تعيين الأعمدة بصرامة حسب ترتيبها الأفقي (Index-based Mapping) لضمان عدم حدوث أي ترحيل
                     active_lives_val = int(nums[0]) if len(nums) > 0 else int(total_members)
                     claims_cnt_val = int(nums[1]) if len(nums) > 1 else 0
                     p_sar = float(nums[2]) if len(nums) > 2 else 0.0
@@ -170,10 +175,10 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
 
                     monthly_rows.append({
                         "created_at": created_at_ts,
-                        "policy_year": current_policy_year,
+                        "policy_year": current_policy_year or "LAST POLICY YEAR",
                         "table_header": file_name,
                         "month_code": row_date,
-                        "class_tier": current_class_tier,
+                        "class_tier": current_class_tier or "CLASS VIP",
                         "active_lives": active_lives_val,
                         "claims_count": claims_cnt_val,
                         "paid_claims_sar": p_sar,
@@ -190,9 +195,9 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
             if nums and len(row_text) > 4 and not any(w in line_lower for w in ['total', 'limit', 'coinsurance', 'الإجمالي']):
                 benefit_rows.append({
                     "created_at": created_at_ts,
-                    "policy_year": current_policy_year,
+                    "policy_year": current_policy_year or "LAST POLICY YEAR",
                     "table_header": file_name,
-                    "class_tier": current_class_tier,
+                    "class_tier": current_class_tier or "CLASS VIP",
                     "benefit_name": row_text[:40].strip(),
                     "claims_count": int(nums[0]) if len(nums) > 5 else 0,
                     "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
@@ -209,9 +214,9 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
             if nums and len(row_text) > 4 and not any(w in line_lower for w in ['total', 'provider', 'الإجمالي']):
                 provider_rows.append({
                     "created_at": created_at_ts,
-                    "policy_year": current_policy_year,
+                    "policy_year": current_policy_year or "LAST POLICY YEAR",
                     "table_header": file_name,
-                    "class_tier": current_class_tier,
+                    "class_tier": current_class_tier or "CLASS VIP",
                     "provider_name": row_text[:40].strip(),
                     "claims_count": int(nums[0]) if len(nums) > 5 else 0,
                     "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
@@ -225,9 +230,9 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
     all_rows = monthly_rows + benefit_rows + provider_rows
     return pd.DataFrame(all_rows)
 
-# واجهة Streamlit مع إدخالات ديناميكية كاملة بدون قيم صلبة
+# واجهة Streamlit ديناميكية بالكامل
 st.title("مرصد المطالبات التأمينية | المعاينة والربط الذكي")
-st.markdown("استخراج الأقسام الثلاثة ديناميكياً باستخدام الإحداثيات المكانية والربط بـ BigQuery.")
+st.markdown("استخراج الأقسام الثلاثة ديناميكياً والربط بـ BigQuery بدون أي قيم صلبة.")
 
 col_1, col_2 = st.columns(2)
 with col_1:
@@ -249,7 +254,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطبيق محرك الإحداثيات المكانية..."):
+        with st.spinner("جاري قراءة الملف وتطبيق محرك الإحداثيات المكانية الذكي..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
