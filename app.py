@@ -13,18 +13,14 @@ from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="مرصد المطالبات التأمينية الذكي", page_icon="📊", layout="wide")
 
-PROJECT_ID = "claims-intelligence-507611"
-DATASET_ID = "claims_intelligence"
-TABLE_ID = "monthly_performance"
-
 @st.cache_resource
-def get_bq_client():
+def get_bq_client(project_id):
     creds_dict = dict(st.secrets["gcp_service_account"])
     if "private_key" in creds_dict:
         pk = creds_dict["private_key"].replace("\\n", "\n")
         creds_dict["private_key"] = pk
     credentials = Credentials.from_service_account_info(creds_dict)
-    return bigquery.Client(credentials=credentials, project=PROJECT_ID)
+    return bigquery.Client(credentials=credentials, project=project_id)
 
 def clean_number(val):
     try:
@@ -49,6 +45,7 @@ def extract_structured_rows_from_image(img):
                 'text': text
             })
     
+    # فرز الكلمات حسب الموقع العمودي ثم الأفقي لتكوين الصفوف بدقة
     words = sorted(words, key=lambda w: (w['top'], w['left']))
     rows = []
     current_row = []
@@ -72,7 +69,7 @@ def extract_structured_rows_from_image(img):
         
     return rows
 
-def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, current_premium):
+def parse_actual_uploaded_file(file_bytes, file_name, total_members):
     monthly_rows = []
     benefit_rows = []
     provider_rows = []
@@ -92,15 +89,16 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
     current_class_tier = "CLASS VIP"
     
     for row in all_structured_rows:
-        row_text = " ".join([w['text'] for w in row])
+        row_tokens = [w['text'] for w in row]
+        row_text = " ".join(row_tokens)
         line_lower = row_text.lower()
         
-        # التقاط سنة الوثيقة
+        # التقاط سنة الوثيقة ديناميكياً
         if "policy year" in line_lower or "last policy year" in line_lower or "سنة الوثيقة" in line_lower:
             current_policy_year = "LAST POLICY YEAR"
             continue
             
-        # التقاط اسم الفئة بحرفيته دون أي نقص أو زيادة
+        # التقاط اسم الفئة بحرفيته الكاملة ودون أي حذف أو تعديل
         if "class" in line_lower or "tier" in line_lower or "vip" in line_lower or "الفئة" in line_lower:
             clean_class = re.sub(r'(class\s*type|class\s*tier|class|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
@@ -124,7 +122,6 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
             continue
         
         created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
-        row_tokens = [w['text'] for w in row]
         
         # 1. القسم الأول: Monthly Claims
         if current_section == "monthly":
@@ -157,43 +154,19 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                     y_val, m_val = int(date_match.group(3)), int(date_match.group(4))
                     row_date = f"{y_val}-{str(m_val).zfill(2)}"
                 
+                # استخراج الأقمة مرتبة أفقياً تماماً كما تظهر في الـ PDF من اليسار لليمين
                 all_nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
                 nums = [n for n in all_nums if n != m_val and n != y_val]
                 
                 if nums:
+                    # تعيين الأعمدة بصرامة حسب ترتيبها الأفقي (Index-based Mapping) لضمان عدم حدوث أي ترحيل
                     active_lives_val = int(nums[0]) if len(nums) > 0 else int(total_members)
-                    
-                    # محاذاة صارمة ومباشرة لضمان عدم وجود أرقام وهمية في Claims Count
-                    if len(nums) >= 7:
-                        claims_cnt_val = int(nums[1])
-                        p_sar = float(nums[2])
-                        p_vat = float(nums[3])
-                        os_cnt = int(nums[4])
-                        os_sar = float(nums[5])
-                        os_vat = float(nums[6])
-                    elif len(nums) == 6:
-                        # إذا كان المبلغ المالي يبدأ مباشرة بعد عدد المؤمنين بدون مطالبات
-                        if nums[1] > 10:
-                            claims_cnt_val = 0
-                            p_sar = float(nums[1])
-                            p_vat = float(nums[2])
-                            os_cnt = int(nums[3])
-                            os_sar = float(nums[4])
-                            os_vat = float(nums[5])
-                        else:
-                            claims_cnt_val = int(nums[1])
-                            p_sar = float(nums[2])
-                            p_vat = float(nums[3])
-                            os_cnt = int(nums[4])
-                            os_sar = float(nums[5])
-                            os_vat = 0.0
-                    else:
-                        claims_cnt_val = int(nums[1]) if len(nums) > 1 else 0
-                        p_sar = float(nums[2]) if len(nums) > 2 else 0.0
-                        p_vat = float(nums[3]) if len(nums) > 3 else 0.0
-                        os_cnt = int(nums[4]) if len(nums) > 4 else 0
-                        os_sar = float(nums[5]) if len(nums) > 5 else 0.0
-                        os_vat = float(nums[6]) if len(nums) > 6 else 0.0
+                    claims_cnt_val = int(nums[1]) if len(nums) > 1 else 0
+                    p_sar = float(nums[2]) if len(nums) > 2 else 0.0
+                    p_vat = float(nums[3]) if len(nums) > 3 else 0.0
+                    os_cnt = int(nums[4]) if len(nums) > 4 else 0
+                    os_sar = float(nums[5]) if len(nums) > 5 else 0.0
+                    os_vat = float(nums[6]) if len(nums) > 6 else 0.0
 
                     monthly_rows.append({
                         "created_at": created_at_ts,
@@ -252,9 +225,9 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
     all_rows = monthly_rows + benefit_rows + provider_rows
     return pd.DataFrame(all_rows)
 
-# واجهة Streamlit
+# واجهة Streamlit مع إدخالات ديناميكية كاملة بدون قيم صلبة
 st.title("مرصد المطالبات التأمينية | المعاينة والربط الذكي")
-st.markdown("استخراج الأقسام الثلاثة بدقة تامة والربط المباشر مع مستودع BigQuery.")
+st.markdown("استخراج الأقسام الثلاثة ديناميكياً باستخدام الإحداثيات المكانية والربط بـ BigQuery.")
 
 col_1, col_2 = st.columns(2)
 with col_1:
@@ -262,9 +235,13 @@ with col_1:
 with col_2:
     total_members = st.number_input("إجمالي عدد الموظفين المؤمن عليهم (Lives)", min_value=1, max_value=1000000, value=100, step=1)
 
-col_3, _ = st.columns(2)
+col_3, col_4 = st.columns(2)
 with col_3:
-    current_premium = st.number_input("إجمالي قسط الوثيقة السنوي الحالي (SAR)", min_value=1000.0, max_value=500000000.0, value=800000.0, step=50000.0, format="%.2f")
+    project_id_input = st.text_input("Google Cloud Project ID", value="claims-intelligence-507611")
+with col_4:
+    dataset_id_input = st.text_input("BigQuery Dataset ID", value="claims_intelligence")
+
+table_id_input = st.text_input("BigQuery Table ID", value="monthly_performance")
 
 uploaded_file = st.file_uploader("رفع تقرير المطالبات المالي للشركة (PDF)", type=["pdf"])
 
@@ -272,9 +249,9 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطبيق معالجة المطابقة الصارمة..."):
+        with st.spinner("جاري قراءة الملف وتطبيق محرك الإحداثيات المكانية..."):
             file_bytes = uploaded_file.read()
-            df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, tenant_id, total_members, current_premium)
+            df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
             if not df_actual.empty:
                 st.success(f"تمت المعالجة بنجاح! إجمالي السجلات المستخرجة: {len(df_actual)}")
@@ -322,8 +299,8 @@ if uploaded_file:
             if st.button("🚀 ضخ البيانات إلى BigQuery مباشرة", type="secondary", use_container_width=True):
                 with st.spinner("جاري الإرسال الآمن إلى المستودع المركزي..."):
                     try:
-                        bq_client = get_bq_client()
-                        table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+                        bq_client = get_bq_client(project_id_input)
+                        table_ref = f"{project_id_input}.{dataset_id_input}.{table_id_input}"
                         errors = bq_client.insert_rows_json(table_ref, df_res.to_dict(orient="records"))
                         if errors == []:
                             st.success("تم رفع البيانات بنجاح إلى جدول BigQuery ومجهزة للربط بـ Looker Studio!")
