@@ -85,25 +85,24 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                         })
                         
             elif current_section == "benefit":
-                # التقاط تفاصيل المنفعة والمبالغ المرتبطة بها
                 nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line) if clean_number(n) > 0]
-                if nums and len(line) > 5:
+                if nums and len(line) > 3:
                     benefit_data.append({
                         "benefit_name": line[:40],
                         "benefit_claims": nums[-1]
                     })
                     
             elif current_section == "providers":
-                # التقاط أسماء مقدمي الخدمة والمبالغ
                 nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line) if clean_number(n) > 0]
-                if nums and len(line) > 5:
+                if nums and len(line) > 3:
                     providers_data.append({
                         "provider_name": line[:40],
                         "provider_amount": nums[-1]
                     })
 
-    # بناء الجدول الموحد (يمكنك توجيهه للجدول الرئيسي أو جداول منفصلة في BigQuery)
     final_rows = []
+    
+    # 1. Monthly Claims
     if monthly_data:
         seen_months = set()
         for item in monthly_data:
@@ -123,7 +122,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                     "loss_ratio_pct": float(round((clm_val / (current_premium / 12)) * 100, 2)) if current_premium > 0 else 0.0
                 })
                 
-    # إضافة بيانات المنافع ومزودي الخدمة كأقسام إضافية في نفس الجدول لسهولة الحفظ في BigQuery
+    # 2. Breakdown by Benefit
     for b in benefit_data:
         final_rows.append({
             "tenant_id": str(tenant_id),
@@ -137,6 +136,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
             "loss_ratio_pct": 0.0
         })
         
+    # 3. Top 20 Providers
     for p in providers_data:
         final_rows.append({
             "tenant_id": str(tenant_id),
@@ -152,9 +152,9 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
     
     return pd.DataFrame(final_rows)
 
-# واجهة المستخدم عبر Streamlit
-st.title("مرصد المطالبات التأمينية | التحليل الفعلي المستقل")
-st.markdown("منصة متعددة المستخدمين — ارفع تقرير شركتك (نصي أو مسحوب ضوئياً) لاستخراج البيانات الحقيقية وتوليد لوحة القرار الفورية.")
+# واجهة المستخدم
+st.title("مرصد المطالبات التأمينية | التحليل الشامل للأقسام الثلاثة")
+st.markdown("منصة تحليل تقارير التأمين — استخراج المطالبات الشهرية، تفاصيل المنافع، وأبرز مقدمي الخدمة بدقة.")
 
 col_1, col_2 = st.columns(2)
 with col_1:
@@ -171,49 +171,70 @@ uploaded_file = st.file_uploader("رفع تقرير المطالبات الما�
 if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
-    if st.button("قراءة وتحليل الملف الفعلي وتوليد اللوحة", type="primary"):
-        with st.spinner(f"جاري معالجة المستند لـ {company_name} بدقة مطلقة..."):
+    if st.button("قراءة وتحليل الملف وتوليد الأقسام الثلاثة", type="primary"):
+        with st.spinner(f"جاري معالجة المستند لـ {company_name} وفصل الأقسام التأمينية..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, tenant_id, total_members, current_premium)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
             if not df_actual.empty:
-                st.success(f"تمت قراءة المستند بنجاح واستخراج {len(df_actual)} سجل شهري!")
+                st.success(f"تمت قراءة المستند بنجاح وإنجاز التقسيم بنجاح ({len(df_actual)} سجل إجمالي)!")
             else:
-                st.warning("لم يتم العثور على جداول شهرية مطابقة. تأكد من أن ملف الـ PDF يحتوي على جدول ببيانات الأشهر والمطالبات.")
+                st.warning("لم يتم العثور على بيانات مطابقة. تأكد من وضوح محتوى ملف الـ PDF.")
 
     active_key = f"real_dash_{tenant_id}"
     if active_key in st.session_state and not st.session_state[active_key].empty:
         df_res = st.session_state[active_key]
         
+        # تقسيم الداتا إلى الأقسام الثلاثة
+        df_monthly = df_res[df_res['section_type'] == 'Monthly Claims']
+        df_benefit = df_res[df_res['section_type'] == 'Breakdown by Benefit']
+        df_providers = df_res[df_res['section_type'] == 'Top 20 Providers']
+        
         st.markdown("---")
-        st.subheader(f"📊 لوحة القرار التنفيذي الفعلي لـ: {company_name}")
+        st.subheader(f"📊 لوحة القرار التنفيذي للجهة: {company_name}")
         
-        total_paid = df_res['paid_claims_sar'].sum()
-        target_savings = total_paid * 0.15
+        # عرض الأقسام عبر تبويبات منفصلة (Tabs)
+        tab1, tab2, tab3 = st.tabs([
+            "📅 1. المطالبات الشهرية", 
+            "🏥 2. التوزيع حسب المنفعة", 
+            "🏆 3. أعلى 20 مزود خدمة"
+        ])
         
-        kpi1, kpi2 = st.columns(2)
-        kpi1.metric("إجمالي المطالبات المستخرجة فعلياً", f"{total_paid:,.2f} SAR")
-        kpi2.metric("الوفورات المستهدفة للتفاوض (15%)", f"{target_savings:,.2f} SAR", "فرصة لخفض الأقساط")
+        with tab1:
+            st.markdown("### القسم الأول: المطالبات الشهرية (Monthly Claims)")
+            total_monthly = df_monthly['paid_claims_sar'].sum() if not df_monthly.empty else 0.0
+            st.metric("إجمالي المطالبات الشهرية", f"{total_monthly:,.2f} SAR")
+            st.dataframe(df_monthly, use_container_width=True)
+            
+        with tab2:
+            st.markdown("### القسم الثاني: التوزيع حسب المنفعة (Breakdown by Benefit)")
+            total_benefit = df_benefit['paid_claims_sar'].sum() if not df_benefit.empty else 0.0
+            st.metric("إجمالي مطالبات المنافع", f"{total_benefit:,.2f} SAR")
+            st.dataframe(df_benefit, use_container_width=True)
+            
+        with tab3:
+            st.markdown("### القسم الثالث: أبرز مقدمي الخدمة (Top 20 Utilised Providers)")
+            total_prov = df_providers['paid_claims_sar'].sum() if not df_providers.empty else 0.0
+            st.metric("إجمالي مطالبات المزودين", f"{total_prov:,.2f} SAR")
+            st.dataframe(df_providers, use_container_width=True)
         
-        st.markdown("### جدول البيانات المستخرجة من الملف المرفق")
-        st.dataframe(df_res, use_container_width=True)
-        
+        st.markdown("---")
         csv_export = df_res.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 تحميل التقرير المستخلص (CSV)",
+            label="📥 تحميل التقرير الكامل للأقسام الثلاثة (CSV)",
             data=csv_export,
-            file_name=f"actual_claims_{tenant_id}.csv",
+            file_name=f"comprehensive_claims_{tenant_id}.csv",
             mime="text/csv",
         )
         
-        if st.button("حفظ بيانات الجهة في مستودع BigQuery المركزي", type="secondary"):
+        if st.button("حفظ بيانات الأقسام الثلاثة في مستودع BigQuery المركزي", type="secondary"):
             with st.spinner("جاري الضخ الآمن..."):
                 try:
                     bq_client = get_bq_client()
                     table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
                     errors = bq_client.insert_rows_json(table_ref, df_res.to_dict(orient="records"))
                     if errors == []:
-                        st.success("تم حفظ البيانات الفعلية للمستخدم بنجاح في المستودع المركزي!")
+                        st.success("تم حفظ جميع الأقسام بنجاح في المستودع المركزي!")
                     else:
                         st.error(f"خطأ في الحفظ: {errors}")
                 except Exception as e:
