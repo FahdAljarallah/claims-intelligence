@@ -62,17 +62,21 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                 current_policy_year = "LAST POLICY YEAR"
                 continue
                 
-            # تنظيف واستخراج قيمة الفئة (Class Tier) ديناميكياً بدون التسمية
+            # التقاط اسم الفئة (حتى لو امتد لسطرين أو تضمن تفاصيل طويلة)
             if "class" in line_lower or "tier" in line_lower or "vip" in line_lower or "الفئة" in line_lower:
                 clean_class = re.sub(r'(class\s*type|class\s*tier|class|الفئة[:\s]*)', '', line, flags=re.IGNORECASE).strip()
                 if clean_class:
                     current_class_tier = clean_class
                 continue
+            elif current_class_tier and not any(k in line_lower for k in ["monthly claim", "breakdown", "top 20", "limit", "coinsurance"]) and len(line) > 5 and not re.search(r'\b(20\d{2})\b', line):
+                # إذا كان السطر مكملاً لاسم الفئة الطويل
+                if "female" in line_lower or "male" in line_lower or "employee" in line_lower or "without" in line_lower:
+                    current_class_tier += " " + line.strip()
+                    continue
                 
             # تحديد الأقسام الرئيسية
             if any(k in line_lower for k in ["monthly claim", "number of lives at start", "المطالبات الشهرية"]):
                 current_section = "monthly"
-                # لا نعمل continue هنا لنسمح بالتقاط سطر Number of lives at start إذا كان موجوداً ضمن هذا القسم
             elif any(k in line_lower for k in ["breakdown by benefit", "التوزيع حسب المنفعة"]):
                 current_section = "benefit"
                 continue
@@ -84,7 +88,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
             
             # 1. القسم الأول: Monthly Claims
             if current_section == "monthly":
-                # معالجة سطر Number of lives at start وتصفير الأعمدة التابعة له
+                # معالجة سطر Number of lives at start
                 if "number of lives at start" in line_lower:
                     nums_lives = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line)]
                     lives_val = int(nums_lives[0]) if nums_lives else int(total_members)
