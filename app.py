@@ -97,8 +97,8 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
             current_policy_year = row_text.strip()
             continue
             
-        # التقاط اسم الفئة ديناميكياً بحرفيتها
-        if "class" in line_lower or "tier" in line_lower or "vip" in line_lower or "الفئة" in line_lower:
+        # التقاط اسم الفئة ديناميكياً بالاعتماد على keywords عامة دون افتراض VIP
+        if "class" in line_lower or "tier" in line_lower or "الفئة" in line_lower:
             clean_class = re.sub(r'(class\s*type|class\s*tier|class|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
                 clean_class = row_text.split(":")[-1].strip()
@@ -132,7 +132,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     "policy_year": current_policy_year or "LAST POLICY YEAR",
                     "table_header": file_name,
                     "month_code": "Number of lives at start",
-                    "class_tier": current_class_tier or "CLASS VIP",
+                    "class_tier": current_class_tier or "CLASS GENERAL",
                     "active_lives": lives_val,
                     "claims_count": 0,
                     "paid_claims_sar": 0.0,
@@ -153,7 +153,6 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     y_val, m_val = int(date_match.group(3)), int(date_match.group(4))
                     row_date = f"{y_val}-{str(m_val).zfill(2)}"
                 
-                # استبعاد توكن التاريخ نفسه حصراً من التوكنات لضمان عدم حذف أي أرقام تشابه رقم الشهر
                 filtered_tokens = []
                 date_excluded = False
                 for t in row_tokens:
@@ -178,7 +177,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                         "policy_year": current_policy_year or "LAST POLICY YEAR",
                         "table_header": file_name,
                         "month_code": row_date,
-                        "class_tier": current_class_tier or "CLASS VIP",
+                        "class_tier": current_class_tier or "CLASS GENERAL",
                         "active_lives": active_lives_val,
                         "claims_count": claims_cnt_val,
                         "paid_claims_sar": p_sar,
@@ -197,7 +196,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     "created_at": created_at_ts,
                     "policy_year": current_policy_year or "LAST POLICY YEAR",
                     "table_header": file_name,
-                    "class_tier": current_class_tier or "CLASS VIP",
+                    "class_tier": current_class_tier or "CLASS GENERAL",
                     "benefit_name": row_text[:40].strip(),
                     "claims_count": int(nums[0]) if len(nums) > 5 else 0,
                     "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
@@ -216,7 +215,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     "created_at": created_at_ts,
                     "policy_year": current_policy_year or "LAST POLICY YEAR",
                     "table_header": file_name,
-                    "class_tier": current_class_tier or "CLASS VIP",
+                    "class_tier": current_class_tier or "CLASS GENERAL",
                     "provider_name": row_text[:40].strip(),
                     "claims_count": int(nums[0]) if len(nums) > 5 else 0,
                     "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
