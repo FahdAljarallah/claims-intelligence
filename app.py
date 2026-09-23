@@ -239,26 +239,24 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     "benefit_name": benefit_label
                 })
         
-        # 3. القسم الثالث: Top 20 Providers
+        # 3. القسم الثالث: Top 20 Providers (عزل اسم المزود بالاعتماد على آخر 6 أعمدة عددية ثابتة للجدول)
         elif current_section == "providers":
-            nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
+            all_nums = [(idx, clean_number(t), t) for idx, t in enumerate(row_tokens) if re.search(r'\d', t)]
             
-            if not nums or len(nums) < 3 or "provider" in line_lower or "confidential" in line_lower or "page" in line_lower:
+            if len(all_nums) < 3 or "provider" in line_lower or "confidential" in line_lower or "page" in line_lower:
                 continue
 
-            non_num_tokens = []
-            for t in row_tokens:
-                if (t.replace(',', '').replace('.', '').isdigit() and float(t.replace(',', '')) > 9) or '.' in t:
-                    break
-                non_num_tokens.append(t)
+            # استخراج آخر 6 أرقام بوصفها أعمدة الجدول المالية الأساسية لـ SAMA
+            metrics_nums = all_nums[-6:] if len(all_nums) >= 6 else all_nums
+            first_metric_idx = metrics_nums[0][0]
             
-            prov_name = " ".join(non_num_tokens).strip(' .:-')
+            # كل ما يسبق أول عمود مالي هو اسم المزود النقي
+            prov_tokens = row_tokens[:first_metric_idx]
+            prov_name = " ".join(prov_tokens).strip(' .:-')
             if not prov_name or len(prov_name) < 2 or prov_name.isdigit():
                 prov_name = row_text[:40].strip()
 
-            real_nums = [clean_number(t) for t in row_tokens[len(non_num_tokens):] if re.search(r'\d', t)]
-            if not real_nums or len(real_nums) < 3:
-                real_nums = nums
+            real_nums = [item[1] for item in metrics_nums]
 
             provider_rows.append({
                 "created_at": created_at_ts,
@@ -302,7 +300,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتطهير السجلات بدقة تامة..."):
+        with st.spinner("جاري قراءة الملف وتثبيت هيكل أعمدة المزودين..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
