@@ -97,7 +97,7 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
             current_policy_year = row_text.strip()
             continue
             
-        # التقاط اسم الفئة بالكامل وإزالة أي نقطة لاصقة بالخلفية ناتجة عن تداخل حدود الـ PDF
+        # التقاط اسم الفئة بالكامل ودون نقاط زائدة
         if "class" in line_lower or "tier" in line_lower or "الفئة" in line_lower:
             clean_class = re.sub(r'(class\s*type|class\s*tier|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
@@ -109,7 +109,6 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     clean_class = match_class_full.group(1).strip()
             
             if clean_class:
-                # إزالة النقطة النهائية الملتصقة بدقة تامة
                 clean_class = re.sub(r'\.$', '', clean_class)
                 current_class_tier = clean_class
             continue
@@ -200,12 +199,23 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
         elif current_section == "benefit":
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
             if nums and len(row_text) > 4 and not any(w in line_lower for w in ['total', 'limit', 'coinsurance', 'الإجمالي']):
+                benefit_keywords = ['basic coverage', 'in-patient', 'out-patient', 'dental', 'optical', 'maternity']
+                found_benefit = "General Benefit"
+                for bk in benefit_keywords:
+                    if bk in line_lower:
+                        found_benefit = row_text[row_text.lower().index(bk):].split()[0:3]
+                        found_benefit = " ".join(found_benefit).strip(' .:-')
+                        break
+                
+                if found_benefit == "General Benefit" and len(row_text) > 20:
+                    found_benefit = row_text[:30].strip(' .:-')
+
                 benefit_rows.append({
                     "created_at": created_at_ts,
                     "policy_year": current_policy_year or "LAST POLICY YEAR",
                     "table_header": file_name,
                     "class_tier": current_class_tier or "CLASS GENERAL",
-                    "benefit_name": row_text[:40].strip(),
+                    "benefit_name": found_benefit,
                     "claims_count": int(nums[0]) if len(nums) > 5 else 0,
                     "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
                     "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
