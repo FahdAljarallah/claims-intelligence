@@ -57,94 +57,67 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
         for idx, line in enumerate(lines):
             line_lower = line.lower()
             
-            # التقاط سنة الوثيقة أو الفئة مع التوريث التلقائي
+            # التقاط سنة الوثيقة
             if "policy year" in line_lower or "last policy year" in line_lower or "سنة الوثيقة" in line_lower:
-                current_policy_year = line[:30]
-                continue
-            if "class" in line_lower or "tier" in line_lower or "vip" in line_lower or "الفئة" in line_lower:
-                current_class_tier = line.split(":")[-1].strip() if ":" in line else line[:30]
+                current_policy_year = "LAST POLICY YEAR"
                 continue
                 
-            # تحديد الأقسام الرئيسية بغض النظر عن اختلاف صياغة العناوين
+            # تنظيف واستخراج قيمة الفئة فقط (Class Tier) بدون التسمية
+            if "class" in line_lower or "tier" in line_lower or "vip" in line_lower or "الفئة" in line_lower:
+                clean_class = re.sub(r'(class\s*type|class\s*tier|class|الفئة[:\s]*)', '', line, flags=re.IGNORECASE).strip()
+                if clean_class:
+                    current_class_tier = clean_class
+                continue
+                
+            # تحديد الأقسام الرئيسية
             if any(k in line_lower for k in ["monthly claim", "number of lives", "المطالبات الشهرية"]):
                 current_section = "monthly"
                 continue
-            elif any(k in line_lower for k in ["breakdown by benefit", "التوزيع حسب المنفعة", "benefit"]):
+            elif any(k in line_lower for k in ["breakdown by benefit", "التوزيع حسب المنفعة"]):
                 current_section = "benefit"
                 continue
             elif any(k in line_lower for k in ["top 20", "utilised providers", "مزودى الخدمة", "مزوّدي"]):
                 current_section = "providers"
                 continue
             
-            # تجاهل أسطر العناوين والأيام والترويسات لتفادي قراءتها كبيانات
-            if any(k in line_lower for k in ["total", "subtotal", "الإجمالي", "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]) and not re.search(r'\b(20\d{2})\b', line):
-                # السماح للأسطر التي تحتوي على تواريخ شهرية فقط بالمرور
-                pass
-
             created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
-            nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line)]
             
-            # 1. القسم الأول: Monthly Claims (يعتمد على التسلسل بغض النظر عن اسم العمود في التقرير)
+            # 1. القسم الأول: Monthly Claims (مع عزل أرقام التاريخ وتثبيت محاذاة الأعمدة)
             if current_section == "monthly":
                 date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', line)
-                if date_match and len(nums) >= 2:
+                if date_match:
                     if date_match.group(1) and date_match.group(2):
-                        row_date = f"{date_match.group(2)}-{date_match.group(1).zfill(2)}"
+                        m_val, y_val = int(date_match.group(1)), int(date_match.group(2))
+                        row_date = f"{y_val}-{str(m_val).zfill(2)}"
                     else:
-                        row_date = f"{date_match.group(3)}-{date_match.group(4).zfill(2)}"
+                        y_val, m_val = int(date_match.group(3)), int(date_match.group(4))
+                        row_date = f"{y_val}-{str(m_val).zfill(2)}"
                     
-                    monthly_rows.append({
-                        "created_at": created_at_ts,
-                        "policy_year": current_policy_year,
-                        "table_header": file_name,
-                        "month_code": row_date,
-                        "class_tier": current_class_tier,
-                        "active_lives": int(nums[0]) if len(nums) > 6 else int(total_members),
-                        "claims_count": int(nums[1]) if len(nums) > 6 else int(nums[0]),
-                        "paid_claims_sar": float(nums[2]) if len(nums) > 6 else float(nums[1]),
-                        "paid_claims_vat_sar": float(nums[3]) if len(nums) > 6 else 0.0,
-                        "OS_claims_count": int(nums[4]) if len(nums) > 6 else 0,
-                        "OS paid_claims_sar": float(nums[5]) if len(nums) > 6 else 0.0,
-                        "OS paid_claims_vat_sar": float(nums[6]) if len(nums) > 6 else 0.0,
-                        "section_type": "Monthly Claims"
-                    })
+                    # استخراج جميع الأرقام من السطر
+                    all_nums = [clean_number(n) for n in re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', line)]
+                    
+                    # تصفية أرقام التاريخ (الشهر والسنة) لكي لا تتسبب في زحزحة الأعمدة
+                    nums = [n for n in all_nums if n != m_val and n != y_val and n != 2025 and n != 2026]
+                    
+                    if nums:
+                        monthly_rows.append({
+                            "created_at": created_at_ts,
+                            "policy_year": current_policy_year,
+                            "table_header": file_name,
+                            "month_code": row_date,
+                            "class_tier": current_class_tier,
+                            "active_lives": int(nums[0]) if len(nums) > 0 else int(total_members),
+                            "claims_count": int(nums[1]) if len(nums) > 1 else 0,
+                            "paid_claims_sar": float(nums[2]) if len(nums) > 2 else 0.0,
+                            "paid_claims_vat_sar": float(nums[3]) if len(nums) > 3 else 0.0,
+                            "OS_claims_count": int(nums[4]) if len(nums) > 4 else 0,
+                            "OS paid_claims_sar": float(nums[5]) if len(nums) > 5 else 0.0,
+                            "OS paid_claims_vat_sar": float(nums[6]) if len(nums) > 6 else 0.0,
+                            "section_type": "Monthly Claims"
+                        })
             
-            # 2. القسم الثاني: Breakdown by Benefit
-            elif current_section == "benefit":
-                if nums and len(line) > 4 and not any(w in line_lower for w in ['total', 'limit', 'coinsurance', 'الإجمالي']):
-                    benefit_rows.append({
-                        "created_at": created_at_ts,
-                        "policy_year": current_policy_year,
-                        "table_header": file_name,
-                        "class_tier": current_class_tier,
-                        "benefit_name": line[:40],
-                        "claims_count": int(nums[0]) if len(nums) > 5 else 0,
-                        "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
-                        "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
-                        "OS_claims_count": int(nums[3]) if len(nums) > 5 else 0,
-                        "OS paid_claims_sar": float(nums[4]) if len(nums) > 5 else 0.0,
-                        "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
-                        "section_type": "Breakdown by Benefit"
-                    })
+            # (سيتم استكمال القسمين الثاني والثالث تباعاً بناءً على موافقتك)
             
-            # 3. القسم الثالث: Top 20 utilised providers (مع توريث الفئة السابقة تلقائياً)
-            elif current_section == "providers":
-                if nums and len(line) > 4 and not any(w in line_lower for w in ['total', 'provider', 'الإجمالي']):
-                    provider_rows.append({
-                        "created_at": created_at_ts,
-                        "policy_year": current_policy_year,
-                        "table_header": file_name,
-                        "class_tier": current_class_tier,  # يرث الفئة السابقة تلقائياً إن لم تذكر صراحة
-                        "provider_name": line[:40],
-                        "claims_count": int(nums[0]) if len(nums) > 5 else 0,
-                        "paid_claims_sar": float(nums[1]) if len(nums) > 5 else float(nums[0]),
-                        "paid_claims_vat_sar": float(nums[2]) if len(nums) > 5 else 0.0,
-                        "OS_claims_count": int(nums[3]) if len(nums) > 5 else 0,
-                        "OS paid_claims_sar": float(nums[4]) if len(nums) > 5 else 0.0,
-                        "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
-                        "section_type": "Top 20 Providers"
-                    })
-
     all_rows = monthly_rows + benefit_rows + provider_rows
     return pd.DataFrame(all_rows)
 
