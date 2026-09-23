@@ -4,6 +4,9 @@ import streamlit as st
 import pandas as pd
 import pdfplumber
 import re
+import pdf2image
+import pytesseract
+from PIL import Image
 
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
@@ -31,19 +34,18 @@ def clean_number(val):
     except Exception:
         return 0.0
 
-# محرك قراءة الملف الفعلي واستخراج الأرقام ديناميكياً بدقة
 def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, current_premium):
     parsed_months_data = []
     raw_text = ""
     
+    # 1. محاولة استخراج النص والجداول بالطريقة المباشرة (Native PDF Text)
     try:
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-            for page_idx, page in enumerate(pdf.pages):
+            for page in pdf.pages:
                 t = page.extract_text()
                 if t:
                     raw_text += t + "\n"
                 
-                # المحاولة الأولى: استخراج الجداول المنظمة
                 tables = page.extract_tables()
                 if tables:
                     for table in tables:
@@ -72,9 +74,22 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                                     "extracted_claims": row_claims
                                 })
     except Exception as e:
-        st.error(f"خطأ في قراءة الملف الفعلي: {str(e)}")
+        st.warning(f"ملاحظة في استخراج النص المباشر: {str(e)}")
 
-    # المحاولة الثانية (الاحتياطية): إذا لم تصد الجداول شيئاً، نقوم بمسح النص الخام سطر بسطر
+    # 2. إذا لم يتم العثور على نص كافٍ أو جدول، نقوم بتفعيل الـ OCR عبر Tesseract (للملفات المسحوبة ضوئياً / الصور)
+    if not raw_text.strip() and not parsed_months_data:
+        st.info("الملف غير نصي أو مسحوب ضوئياً، جاري معالجة الصور عبر محرك التعرف الضوئي (OCR)...")
+        try:
+            images = pdf2image.convert_from_bytes(file_bytes)
+            for img in images:
+                # دعم اللغتين العربية والإنجليزية لضمان قراءة التقارير بدقة
+                ocr_text = pytesseract.image_to_string(img, lang='ara+eng')
+                if ocr_text:
+                    raw_text += ocr_text + "\n"
+        except Exception as ocr_err:
+            st.error(f"خطأ في تشغيل محرك الـ OCR: {str(ocr_err)}")
+
+    # 3. تحليل النص الخام المستخرج (سواء من النص المباشر أو الناتج عن الـ OCR)
     if not parsed_months_data and raw_text:
         lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
         for idx, line in enumerate(lines):
@@ -85,9 +100,8 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
                 else:
                     m_code = f"{date_match.group(4)}-{date_match.group(3).zfill(2)}"
                 
-                # البحث عن الأرقام القريبة في نفس السطر أو الأسطر المجاورة
                 nums_in_context = []
-                for scan_idx in range(idx, min(idx + 3, len(lines))):
+                for scan_idx in range(idx, min(idx + 4, len(lines))):
                     found_nums = re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b', lines[scan_idx])
                     for num_str in found_nums:
                         val = clean_number(num_str)
@@ -122,8 +136,9 @@ def parse_actual_uploaded_file(file_bytes, file_name, tenant_id, total_members, 
     
     return pd.DataFrame(final_rows)
 
+# واجهة المستخدم عبر Streamlit
 st.title("مرصد المطالبات التأمينية | التحليل الفعلي المستقل")
-st.markdown("منصة متعددة المستخدمين — ارفع تقرير شركتك لاستخراج البيانات الحقيقية وتوليد لوحة القرار الفورية.")
+st.markdown("منصة متعددة المستخدمين — ارفع تقرير شركتك (نصي أو مسحوب ضوئياً) لاستخراج البيانات الحقيقية وتوليد لوحة القرار الفورية.")
 
 col_1, col_2 = st.columns(2)
 with col_1:
@@ -141,7 +156,7 @@ if uploaded_file:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("قراءة وتحليل الملف الفعلي وتوليد اللوحة", type="primary"):
-        with st.spinner(f"جاري معالجة المستند الفعلي لـ {company_name} بدقة مطلقة..."):
+        with st.spinner(f"جاري معالجة المستند لـ {company_name} بدقة مطلقة..."):
             file_bytes = uploaded_file.read()
             df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, tenant_id, total_members, current_premium)
             st.session_state[f"real_dash_{tenant_id}"] = df_actual
