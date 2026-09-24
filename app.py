@@ -34,6 +34,7 @@ def clean_number(val):
 def extract_structured_rows_from_pdf_bytes(file_bytes):
     all_structured_rows = []
     
+    # المحاولة الأولى: قراءة النصوص المباشرة من الـ PDF الرقمي النظيف باستخدام pdfplumber
     try:
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
@@ -72,6 +73,7 @@ def extract_structured_rows_from_pdf_bytes(file_bytes):
     except Exception:
         pass
 
+    # المحاولة الثانية (Fallback): اللجوء لمحرك الـ OCR المكاني في حال كانت المستندات مسحوبة ضوئياً (Scanned)
     if not all_structured_rows:
         try:
             images = pdf2image.convert_from_bytes(file_bytes)
@@ -124,7 +126,7 @@ def parse_single_file(file_bytes, file_name, total_members):
     if not all_structured_rows:
         return pd.DataFrame()
 
-    current_section = "monthly"  # البدء الافتراضي بالقسم الأول نظراً لأن التقرير يبدأ به فوراً
+    current_section = "monthly"  # البدء الافتراضي بالقسم الأول لحماية التقرير من فقدان البيانات العلوية
     current_policy_year = "LAST POLICY YEAR"
     current_class_tier = "CLASS VIP"
     
@@ -140,12 +142,12 @@ def parse_single_file(file_bytes, file_name, total_members):
             current_policy_year = row_text.strip()
             continue
             
-        # التقاط الفئة بدقة من الحقول العلوية (مثل Class: VIP)
+        # التقاط الفئة بمرونة فائقة من الحقول العلوية أو الجداول
         if "class" in line_lower or "الفئة" in line_lower:
             clean_class = re.sub(r'(class\s*type|class\s*tier|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
                 clean_class = row_text.split(":")[-1].strip()
-            if clean_class and "confidential" not in clean_class.lower() and len(clean_class) < 20:
+            if clean_class and "confidential" not in clean_class.lower() and len(clean_class) < 25:
                 current_class_tier = clean_class
             continue
         elif current_class_tier and not any(k in line_lower for k in ["monthly claim", "breakdown", "top 20", "limit", "coinsurance"]) and len(row_text) > 5 and not re.search(r'\b(20\d{2})\b', row_text):
@@ -153,17 +155,19 @@ def parse_single_file(file_bytes, file_name, total_members):
                 current_class_tier = current_class_tier + " " + row_text.strip()
                 continue
             
-        # الكشف الذكي عن الأقسام بناءً على بنية التقرير (Annual Claims / Breakdown / Providers)
+        # الكشف الهجين والشامل عن الأقسام (يدعم التقرير الرقمي والـ OCR معاً بمرونة مطلقة)
+        if ("breakdown" in line_lower and "benefit" in line_lower) or any(k in line_lower for k in ["التوزيع حسب المنفعة", "basic coverage", "dental", "optical"]) and current_section != "providers":
+            if not any(k in line_lower for k in ["top 20", "utilised"]):
+                current_section = "benefit"
+                continue
+        
+        if ("top 20" in line_lower) or ("utilised" in line_lower and "provider" in line_lower) or any(k in line_lower for k in ["مزودى الخدمة", "مزوّدي"]):
+            current_section = "providers"
+            continue
+
         if any(w in line_lower for w in ["annual claims", "monthly claim", "number of lives at start", "lives at start"]) or re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line_lower):
             if not any(k in line_lower for k in ["top 20", "breakdown by benefit", "utilised providers"]):
                 current_section = "monthly"
-
-        if ("breakdown" in line_lower and "benefit" in line_lower) or any(k in line_lower for k in ["التوزيع حسب المنفعة"]):
-            current_section = "benefit"
-            continue
-        elif ("top 20" in line_lower) or ("utilised" in line_lower and "provider" in line_lower) or any(k in line_lower for k in ["مزودى الخدمة", "مزوّدي"]):
-            current_section = "providers"
-            continue
 
         created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
         
