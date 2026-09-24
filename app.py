@@ -242,7 +242,7 @@ def parse_single_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (استخراج آخر 6 أرقام لتجاوز الخلايا الفارغة + شمول كامل للمنافع)
+        # 2. القسم الثاني: Breakdown by Benefit (إدراج صفر تعويضي عند وجود خلية فارغة وضبط مفتاح الاستشارة)
         elif current_section == "benefit":
             all_nums = [(idx, clean_number(t), t) for idx, t in enumerate(row_tokens) if re.search(r'\d', t)]
             
@@ -270,8 +270,11 @@ def parse_single_file(file_bytes, file_name, total_members):
             elif "total" in line_full_lower or "الإجمالي" in line_full_lower:
                 benefit_label = "Total"
 
-            metrics_nums = all_nums[-6:] if len(all_nums) >= 6 else all_nums
-            real_nums = [item[1] for item in metrics_nums]
+            real_nums = [item[1] for item in all_nums]
+            if len(real_nums) == 5:
+                real_nums.insert(0, 0.0)
+            elif len(real_nums) >= 6:
+                real_nums = real_nums[-6:]
 
             benefit_rows.append({
                 "created_at": created_at_ts,
@@ -349,7 +352,7 @@ if uploaded_files:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة كافة الملفات المرفوعة واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة كافة الأقسام وضبط بنود المنافع بدقة تامة..."):
+        with st.spinner("جاري قراءة كافة الأقسام ومعالجة خلايا المنافع الفارغة بدقة تامة..."):
             all_dfs = []
             for uploaded_file in uploaded_files:
                 file_bytes = uploaded_file.read()
