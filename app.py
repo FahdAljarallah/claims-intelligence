@@ -34,7 +34,6 @@ def clean_number(val):
 def extract_structured_rows_from_pdf_bytes(file_bytes):
     all_structured_rows = []
     
-    # المحاولة الأولى: قراءة النصوص المباشرة من الـ PDF الرقمي النظيف باستخدام pdfplumber
     try:
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
@@ -73,7 +72,6 @@ def extract_structured_rows_from_pdf_bytes(file_bytes):
     except Exception:
         pass
 
-    # المحاولة الثانية (Fallback): اللجوء لمحرك الـ OCR المكاني في حال كانت المستندات مسحوبة ضوئياً (Scanned)
     if not all_structured_rows:
         try:
             images = pdf2image.convert_from_bytes(file_bytes)
@@ -142,7 +140,6 @@ def parse_single_file(file_bytes, file_name, total_members):
             current_policy_year = row_text.strip()
             continue
             
-        # التقاط الفئة بدقة تامة ودون قيود طول تحذف التفاصيل
         if "class" in line_lower or "الفئة" in line_lower:
             clean_class = re.sub(r'(class\s*type|class\s*tier|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
@@ -156,7 +153,6 @@ def parse_single_file(file_bytes, file_name, total_members):
                 current_class_tier = current_class_tier + " - " + row_text.strip().rstrip(' .')
                 continue
             
-        # الكشف الهجين والشامل عن الأقسام
         if ("breakdown" in line_lower and "benefit" in line_lower) or any(k in line_lower for k in ["التوزيع حسب المنفعة", "basic coverage", "dental", "optical"]) and current_section != "providers":
             if not any(k in line_lower for k in ["top 20", "utilised"]):
                 current_section = "benefit"
@@ -172,7 +168,7 @@ def parse_single_file(file_bytes, file_name, total_members):
 
         created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
         
-        # 1. القسم الأول: Monthly Claims
+        # 1. القسم الأول: Monthly Claims (استبعاد تاريخ الشهر من أرقام الحسابات)
         if current_section == "monthly":
             if "number of lives at start" in line_lower or "lives at start" in line_lower:
                 nums_lives = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
@@ -205,7 +201,15 @@ def parse_single_file(file_bytes, file_name, total_members):
                 else:
                     row_date = row_text[:15].strip()
                 
-                nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
+                filtered_tokens = []
+                date_excluded = False
+                for t in row_tokens:
+                    if not date_excluded and re.search(r'\b(0?[1-9]|1[0-2])[\/\-]20\d{2}\b|\b20\d{2}[\/\-](0?[1-9]|1[0-2])\b', t):
+                        date_excluded = True
+                        continue
+                    filtered_tokens.append(t)
+                
+                nums = [clean_number(t) for t in filtered_tokens if re.search(r'\d', t)]
                 
                 if nums:
                     active_lives_val = int(nums[0]) if len(nums) > 0 else int(total_members)
@@ -335,7 +339,7 @@ if uploaded_files:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة كافة الملفات المرفوعة واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة كافة الأقسام وتطبيق المطابقة التامة للفئات..."):
+        with st.spinner("جاري قراءة كافة الأقسام وضبط محاذاة الأعمدة الشهرية..."):
             all_dfs = []
             for uploaded_file in uploaded_files:
                 file_bytes = uploaded_file.read()
