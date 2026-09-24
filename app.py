@@ -236,9 +236,9 @@ def parse_single_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (شامل لجميع المنافع دون استثناء)
+        # 2. القسم الثاني: Breakdown by Benefit (مطابقة دقيقة لجميع بنود المنافع دون تخطي)
         elif current_section == "benefit":
-            benefit_label = "General Benefit"
+            benefit_label = None
             line_full_lower = row_text.lower()
             
             if "out" in line_full_lower or "out-patient" in line_full_lower or "basic coverage (out" in line_full_lower:
@@ -262,7 +262,7 @@ def parse_single_file(file_bytes, file_name, total_members):
 
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
             
-            if nums and len(nums) >= 4:
+            if nums and len(nums) >= 4 and benefit_label:
                 benefit_rows.append({
                     "created_at": created_at_ts,
                     "policy_year": current_policy_year,
@@ -339,7 +339,7 @@ if uploaded_files:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة كافة الملفات المرفوعة واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة كافة الأقسام وجلب كافة تفاصيل المنافع..."):
+        with st.spinner("جاري قراءة كافة الأقسام واستخراج كافة بنود المنافع بدقة..."):
             all_dfs = []
             for uploaded_file in uploaded_files:
                 file_bytes = uploaded_file.read()
