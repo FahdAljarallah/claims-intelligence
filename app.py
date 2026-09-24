@@ -125,8 +125,8 @@ def parse_single_file(file_bytes, file_name, total_members):
         return pd.DataFrame()
 
     current_section = "monthly"
-    current_policy_year = "LAST POLICY YEAR"
-    current_class_tier = "CLASS VIP"
+    current_policy_year = ""
+    current_class_tier = ""
     
     for row in all_structured_rows:
         row_tokens = [w['text'] for w in row]
@@ -140,6 +140,7 @@ def parse_single_file(file_bytes, file_name, total_members):
             current_policy_year = row_text.strip()
             continue
             
+        # التقاط الفئة ديناميكياً وبدون أي قيم صلبة
         if "class" in line_lower or "الفئة" in line_lower:
             clean_class = re.sub(r'(class\s*type|class\s*tier|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
@@ -153,10 +154,10 @@ def parse_single_file(file_bytes, file_name, total_members):
                 current_class_tier = current_class_tier + " - " + row_text.strip().rstrip(' .')
                 continue
             
-        if ("breakdown" in line_lower and "benefit" in line_lower) or any(k in line_lower for k in ["التوزيع حسب المنفعة", "basic coverage", "dental", "optical"]) and current_section != "providers":
-            if not any(k in line_lower for k in ["top 20", "utilised"]):
-                current_section = "benefit"
-                continue
+        # تحديد الأقسام بدون تخطي صفوف البيانات
+        if ("breakdown" in line_lower and "benefit" in line_lower) or any(k in line_lower for k in ["التوزيع حسب المنفعة"]):
+            current_section = "benefit"
+            continue
         
         if ("top 20" in line_lower) or ("utilised" in line_lower and "provider" in line_lower) or any(k in line_lower for k in ["مزودى الخدمة", "مزوّدي"]):
             current_section = "providers"
@@ -175,10 +176,10 @@ def parse_single_file(file_bytes, file_name, total_members):
                 lives_val = int(nums_lives[0]) if nums_lives else int(total_members)
                 monthly_rows.append({
                     "created_at": created_at_ts,
-                    "policy_year": current_policy_year,
+                    "policy_year": current_policy_year or "LAST POLICY YEAR",
                     "table_header": file_name,
                     "month_code": "Number of lives at start",
-                    "class_tier": current_class_tier,
+                    "class_tier": current_class_tier or "CLASS GENERAL",
                     "active_lives": lives_val,
                     "claims_count": 0,
                     "paid_claims_sar": 0.0,
@@ -222,10 +223,10 @@ def parse_single_file(file_bytes, file_name, total_members):
 
                     monthly_rows.append({
                         "created_at": created_at_ts,
-                        "policy_year": current_policy_year,
+                        "policy_year": current_policy_year or "LAST POLICY YEAR",
                         "table_header": file_name,
                         "month_code": row_date,
-                        "class_tier": current_class_tier,
+                        "class_tier": current_class_tier or "CLASS GENERAL",
                         "active_lives": active_lives_val,
                         "claims_count": claims_cnt_val,
                         "paid_claims_sar": p_sar,
@@ -236,7 +237,7 @@ def parse_single_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (مطابقة دقيقة لجميع بنود المنافع دون تخطي)
+        # 2. القسم الثاني: Breakdown by Benefit (التقاط كافة المنافع بدون تخطي الصف الأول)
         elif current_section == "benefit":
             benefit_label = None
             line_full_lower = row_text.lower()
@@ -265,10 +266,10 @@ def parse_single_file(file_bytes, file_name, total_members):
             if nums and len(nums) >= 4 and benefit_label:
                 benefit_rows.append({
                     "created_at": created_at_ts,
-                    "policy_year": current_policy_year,
+                    "policy_year": current_policy_year or "LAST POLICY YEAR",
                     "table_header": file_name,
                     "month_code": "Benefit Summary",
-                    "class_tier": current_class_tier,
+                    "class_tier": current_class_tier or "CLASS GENERAL",
                     "active_lives": 0,
                     "claims_count": int(nums[0]),
                     "paid_claims_sar": float(nums[1]),
@@ -299,9 +300,9 @@ def parse_single_file(file_bytes, file_name, total_members):
 
             provider_rows.append({
                 "created_at": created_at_ts,
-                "policy_year": current_policy_year,
+                "policy_year": current_policy_year or "LAST POLICY YEAR",
                 "table_header": file_name,
-                "class_tier": current_class_tier,
+                "class_tier": current_class_tier or "CLASS GENERAL",
                 "claims_count": int(real_nums[0]) if len(real_nums) > 0 else 0,
                 "paid_claims_sar": float(real_nums[1]) if len(real_nums) > 1 else 0.0,
                 "paid_claims_vat_sar": float(real_nums[2]) if len(real_nums) > 2 else 0.0,
@@ -339,7 +340,7 @@ if uploaded_files:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة كافة الملفات المرفوعة واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة كافة الأقسام واستخراج كافة بنود المنافع بدقة..."):
+        with st.spinner("جاري قراءة كافة الأقسام وجلب كافة بنود المنافع بدقة..."):
             all_dfs = []
             for uploaded_file in uploaded_files:
                 file_bytes = uploaded_file.read()
