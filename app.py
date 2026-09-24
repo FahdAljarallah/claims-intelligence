@@ -126,7 +126,7 @@ def parse_single_file(file_bytes, file_name, total_members):
     if not all_structured_rows:
         return pd.DataFrame()
 
-    current_section = "monthly"  # البدء الافتراضي بالقسم الأول لحماية التقرير من فقدان البيانات العلوية
+    current_section = "monthly"
     current_policy_year = "LAST POLICY YEAR"
     current_class_tier = "CLASS VIP"
     
@@ -142,20 +142,21 @@ def parse_single_file(file_bytes, file_name, total_members):
             current_policy_year = row_text.strip()
             continue
             
-        # التقاط الفئة بمرونة فائقة من الحقول العلوية أو الجداول
+        # التقاط الفئة بدقة تامة ودون قيود طول تحذف التفاصيل
         if "class" in line_lower or "الفئة" in line_lower:
             clean_class = re.sub(r'(class\s*type|class\s*tier|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
                 clean_class = row_text.split(":")[-1].strip()
-            if clean_class and "confidential" not in clean_class.lower() and len(clean_class) < 25:
+            if clean_class and "confidential" not in clean_class.lower():
+                clean_class = clean_class.rstrip(' .')
                 current_class_tier = clean_class
             continue
         elif current_class_tier and not any(k in line_lower for k in ["monthly claim", "breakdown", "top 20", "limit", "coinsurance"]) and len(row_text) > 5 and not re.search(r'\b(20\d{2})\b', row_text):
-            if any(w in line_lower for w in ["female", "male", "employee", "without", "divorced"]):
-                current_class_tier = current_class_tier + " " + row_text.strip()
+            if any(w in line_lower for w in ["female", "male", "employee", "without", "divorced", "single"]):
+                current_class_tier = current_class_tier + " - " + row_text.strip().rstrip(' .')
                 continue
             
-        # الكشف الهجين والشامل عن الأقسام (يدعم التقرير الرقمي والـ OCR معاً بمرونة مطلقة)
+        # الكشف الهجين والشامل عن الأقسام
         if ("breakdown" in line_lower and "benefit" in line_lower) or any(k in line_lower for k in ["التوزيع حسب المنفعة", "basic coverage", "dental", "optical"]) and current_section != "providers":
             if not any(k in line_lower for k in ["top 20", "utilised"]):
                 current_section = "benefit"
@@ -334,7 +335,7 @@ if uploaded_files:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة كافة الملفات المرفوعة واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة كافة الأقسام (Annual Claims, Breakdown, Providers) ودمج البيانات..."):
+        with st.spinner("جاري قراءة كافة الأقسام وتطبيق المطابقة التامة للفئات..."):
             all_dfs = []
             for uploaded_file in uploaded_files:
                 file_bytes = uploaded_file.read()
