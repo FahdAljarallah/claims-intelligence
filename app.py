@@ -266,8 +266,8 @@ if "active_session_id" in st.session_state:
     st.markdown("---")
     st.info(f"🔑 **رمز الجلسة الفعّال:** `{current_sess}`")
     
-    # تمرير المعلمة بالصيغة الهندسية الصحيحة المرتبطة بمصدر البيانات ds14
-    final_dashboard_url = f"{LOOKER_BASE_URL}?params={{ds14.p_client_session:'{current_sess}'}}"
+    # تمرير المعلمة بالطريقة المباشرة المستقرة
+    final_dashboard_url = f"{LOOKER_BASE_URL}?p_client_session={current_sess}"
     
     st.markdown(
         f"""
