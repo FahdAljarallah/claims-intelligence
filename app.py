@@ -3,6 +3,7 @@ import io
 import streamlit as st
 import pandas as pd
 import re
+import pdfplumber
 import pdf2image
 import pytesseract
 from pytesseract import Output
@@ -30,57 +31,101 @@ def clean_number(val):
     except Exception:
         return 0.0
 
-def extract_structured_rows_from_image(img):
-    data = pytesseract.image_to_data(img, output_type=Output.DICT, lang='eng+ara')
-    n_boxes = len(data['text'])
-    words = []
-    for i in range(n_boxes):
-        text = data['text'][i].strip()
-        if text:
-            words.append({
-                'left': data['left'][i],
-                'top': data['top'][i],
-                'width': data['width'][i],
-                'height': data['height'][i],
-                'text': text
-            })
+def extract_structured_rows_from_pdf_bytes(file_bytes):
+    """استخراج النصوص خطوة بخطوة من ملف PDF رقمي أو مرئي بنظام هجين"""
+    all_structured_rows = []
     
-    words = sorted(words, key=lambda w: (w['top'], w['left']))
-    rows = []
-    current_row = []
-    current_top = -1
-    tolerance = 12
-    
-    for w in words:
-        if current_top == -1 or abs(w['top'] - current_top) <= tolerance:
-            current_row.append(w)
-            if current_top == -1:
-                current_top = w['top']
-        else:
-            current_row = sorted(current_row, key=lambda x: x['left'])
-            rows.append(current_row)
-            current_row = [w]
-            current_top = w['top']
-            
-    if current_row:
-        current_row = sorted(current_row, key=lambda x: x['left'])
-        rows.append(current_row)
-        
-    return rows
+    # المحاولة الأولى: استخراج النصوص المباشرة (Digital-Native PDF) باستخدام pdfplumber
+    try:
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            for page in pdf.pages:
+                words = page.extract_words(use_text_flow=True)
+                if words:
+                    # تجميع الكلمات إلى صفوف بناءً على إحداثيات الـ top
+                    page_words = []
+                    for w in words:
+                        page_words.append({
+                            'left': w['x0'],
+                            'top': w['top'],
+                            'width': w['width'],
+                            'height': w['height'],
+                            'text': w['text'].strip()
+                        })
+                    
+                    page_words = sorted(page_words, key=lambda w: (w['top'], w['left']))
+                    rows = []
+                    current_row = []
+                    current_top = -1
+                    tolerance = 6
+                    
+                    for w in page_words:
+                        if current_top == -1 or abs(w['top'] - current_top) <= tolerance:
+                            current_row.append(w)
+                            if current_top == -1:
+                                current_top = w['top']
+                        else:
+                            current_row = sorted(current_row, key=lambda x: x['left'])
+                            rows.append(current_row)
+                            current_row = [w]
+                            current_top = w['top']
+                    if current_row:
+                        current_row = sorted(current_row, key=lambda x: x['left'])
+                        rows.append(current_row)
+                    all_structured_rows.extend(rows)
+    except Exception:
+        pass
 
-def parse_actual_uploaded_file(file_bytes, file_name, total_members):
+    # إذا لم يتم العثور على نص مباشر، نلجأ فوراً لمحرك الـ OCR المكاني للصور الممسوحة
+    if not all_structured_rows:
+        try:
+            images = pdf2image.convert_from_bytes(file_bytes)
+            for img in images:
+                data = pytesseract.image_to_data(img, output_type=Output.DICT, lang='eng+ara')
+                n_boxes = len(data['text'])
+                words = []
+                for i in range(n_boxes):
+                    text = data['text'][i].strip()
+                    if text:
+                        words.append({
+                            'left': data['left'][i],
+                            'top': data['top'][i],
+                            'width': data['width'][i],
+                            'height': data['height'][i],
+                            'text': text
+                        })
+                
+                words = sorted(words, key=lambda w: (w['top'], w['left']))
+                rows = []
+                current_row = []
+                current_top = -1
+                tolerance = 12
+                
+                for w in words:
+                    if current_top == -1 or abs(w['top'] - current_top) <= tolerance:
+                        current_row.append(w)
+                        if current_top == -1:
+                            current_top = w['top']
+                    else:
+                        current_row = sorted(current_row, key=lambda x: x['left'])
+                        rows.append(current_row)
+                        current_row = [w]
+                        current_top = w['top']
+                if current_row:
+                    current_row = sorted(current_row, key=lambda x: x['left'])
+                    rows.append(current_row)
+                all_structured_rows.extend(rows)
+        except Exception as e:
+            st.error(f"خطأ في معالجة ملف الـ PDF: {str(e)}")
+            
+    return all_structured_rows
+
+def parse_single_file(file_bytes, file_name, total_members):
     monthly_rows = []
     benefit_rows = []
     provider_rows = []
     
-    try:
-        images = pdf2image.convert_from_bytes(file_bytes)
-        all_structured_rows = []
-        for img in images:
-            page_rows = extract_structured_rows_from_image(img)
-            all_structured_rows.extend(page_rows)
-    except Exception as e:
-        st.error(f"خطأ في تشغيل الـ OCR المكاني: {str(e)}")
+    all_structured_rows = extract_structured_rows_from_pdf_bytes(file_bytes)
+    if not all_structured_rows:
         return pd.DataFrame()
 
     current_section = "unknown"
@@ -239,18 +284,16 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
                     "benefit_name": benefit_label
                 })
         
-        # 3. القسم الثالث: Top 20 Providers (عزل اسم المزود بالاعتماد على آخر 6 أعمدة عددية ثابتة للجدول)
+        # 3. القسم الثالث: Top 20 Providers
         elif current_section == "providers":
             all_nums = [(idx, clean_number(t), t) for idx, t in enumerate(row_tokens) if re.search(r'\d', t)]
             
             if len(all_nums) < 3 or "provider" in line_lower or "confidential" in line_lower or "page" in line_lower:
                 continue
 
-            # استخراج آخر 6 أرقام بوصفها أعمدة الجدول المالية الأساسية لـ SAMA
             metrics_nums = all_nums[-6:] if len(all_nums) >= 6 else all_nums
             first_metric_idx = metrics_nums[0][0]
             
-            # كل ما يسبق أول عمود مالي هو اسم المزود النقي
             prov_tokens = row_tokens[:first_metric_idx]
             prov_name = " ".join(prov_tokens).strip(' .:-')
             if not prov_name or len(prov_name) < 2 or prov_name.isdigit():
@@ -276,9 +319,9 @@ def parse_actual_uploaded_file(file_bytes, file_name, total_members):
     all_rows = monthly_rows + benefit_rows + provider_rows
     return pd.DataFrame(all_rows)
 
-# واجهة Streamlit ديناميكية بالكامل
+# واجهة Streamlit ديناميكية بالكامل لدعم الملفات المتعددة
 st.title("مرصد المطالبات التأمينية | المعاينة والربط الذكي")
-st.markdown("استخراج الأقسام الثلاثة ديناميكياً والربط بـ BigQuery بدون أي قيم صلبة.")
+st.markdown("استخراج الأقسام الثلاثة ديناميكياً ودعم رفع ملفات متعددة (Digital-Native & Scanned PDFs).")
 
 col_1, col_2 = st.columns(2)
 with col_1:
@@ -294,20 +337,27 @@ with col_4:
 
 table_id_input = st.text_input("BigQuery Table ID", value="monthly_performance")
 
-uploaded_file = st.file_uploader("رفع تقرير المطالبات المالي للشركة (PDF)", type=["pdf"])
+# دعم رفع عدة ملفات PDF دفعة واحدة
+uploaded_files = st.file_uploader("رفع تقارير المطالبات المالية للشركة (PDF - متعدد)", type=["pdf"], accept_multiple_files=True)
 
-if uploaded_file:
+if uploaded_files:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
-    if st.button("معالجة الملف واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملف وتثبيت هيكل أعمدة المزودين..."):
-            file_bytes = uploaded_file.read()
-            df_actual = parse_actual_uploaded_file(file_bytes, uploaded_file.name, total_members)
-            st.session_state[f"real_dash_{tenant_id}"] = df_actual
-            if not df_actual.empty:
-                st.success(f"تمت المعالجة بنجاح! إجمالي السجلات المستخرجة: {len(df_actual)}")
+    if st.button("معالجة كافة الملفات المرفوعة واستخراج الجداول", type="primary"):
+        with st.spinner("جاري قراءة الملفات (النظيفة والمسح الضوئي) ودمج البيانات..."):
+            all_dfs = []
+            for uploaded_file in uploaded_files:
+                file_bytes = uploaded_file.read()
+                df_single = parse_single_file(file_bytes, uploaded_file.name, total_members)
+                if not df_single.empty:
+                    all_dfs.append(df_single)
+            
+            if all_dfs:
+                df_actual = pd.concat(all_dfs, ignore_index=True)
+                st.session_state[f"real_dash_{tenant_id}"] = df_actual
+                st.success(f"تمت معالجة كافة الملفات بنجاح! إجمالي السجلات المستخرجة المدمجة: {len(df_actual)}")
             else:
-                st.warning("تعذر استخراج بيانات مطابقة، تأكد من ملف الـ PDF.")
+                st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة، تأكد من صحة الـ PDF.")
 
     active_key = f"real_dash_{tenant_id}"
     if active_key in st.session_state and not st.session_state[active_key].empty:
@@ -318,7 +368,7 @@ if uploaded_file:
         df_providers = df_res[df_res['section_type'] == 'Top 20 Providers']
         
         st.markdown("---")
-        st.subheader("📋 معاينة البيانات المستخرجة للأقسام الثلاثة")
+        st.subheader("📋 معاينة البيانات المستخرجة لجميع الملفات للأقسام الثلاثة")
         
         tab1, tab2, tab3 = st.tabs([
             "📅 1. Monthly Claims", 
@@ -339,22 +389,22 @@ if uploaded_file:
         with col_dl:
             csv_export = df_res.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="📥 تحميل التقرير الكامل بصيغة (CSV)",
+                label="📥 تحميل التقرير المدمج الكامل بصيغة (CSV)",
                 data=csv_export,
-                file_name=f"claims_export_{tenant_id}.csv",
-                mime="text/css",
+                file_name=f"claims_export_all_{tenant_id}.csv",
+                mime="text/csv",
                 use_container_width=True
             )
             
         with col_bq:
-            if st.button("🚀 ضخ البيانات إلى BigQuery مباشرة", type="secondary", use_container_width=True):
+            if st.button("🚀 ضخ البيانات المدمجة إلى BigQuery مباشرة", type="secondary", use_container_width=True):
                 with st.spinner("جاري الإرسال الآمن إلى المستودع المركزي..."):
                     try:
                         bq_client = get_bq_client(project_id_input)
                         table_ref = f"{project_id_input}.{dataset_id_input}.{table_id_input}"
                         errors = bq_client.insert_rows_json(table_ref, df_res.to_dict(orient="records"))
                         if errors == []:
-                            st.success("تم رفع البيانات بنجاح إلى جدول BigQuery ومجهزة للربط بـ Looker Studio!")
+                            st.success("تم رفع كافة البيانات بنجاح إلى جدول BigQuery ومجهزة للربط بـ Looker Studio!")
                         else:
                             st.error(f"خطأ في الحفظ: {errors}")
                     except Exception as e:
