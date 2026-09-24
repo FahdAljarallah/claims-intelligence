@@ -266,8 +266,8 @@ if "active_session_id" in st.session_state:
     st.markdown("---")
     st.info(f"🔑 **رمز الجلسة الفعّال:** `{current_sess}`")
     
-    # تركيب رابط Looker Studio بالصيغة القياسية السليمة لتمرير بارامتر الفلترة
-    final_dashboard_url = f"{LOOKER_BASE_URL}?p_session_id={current_sess}"
+    # استخدام المعلمة النظيفة والجديدة p_client_session لتمرير رمز الجلسة بدقة تامة
+    final_dashboard_url = f"{LOOKER_BASE_URL}?p_client_session={current_sess}"
     
     st.markdown(
         f"""
