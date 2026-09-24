@@ -1,5 +1,6 @@
 import os
 import io
+import json
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -266,8 +267,18 @@ if "active_session_id" in st.session_state:
     st.markdown("---")
     st.info(f"🔑 **رمز الجلسة الفعّال:** `{current_sess}`")
     
-    # تمرير المعلمة بالصيغة المدعومة كـ URL Parameter لتغذية البارامتر في Looker Studio مباشرة
-    final_dashboard_url = f"{LOOKER_BASE_URL}?p_client_session={current_sess}"
+    # هيكل البارامترات المتوافق مع Looker Studio عبر JSON و URL Encoding
+    params_data = {
+        "ds14": {
+            "p_client_session": current_sess
+        }
+    }
+    
+    json_params = json.dumps(params_data)
+    encoded_params = urllib.parse.quote(json_params)
+    
+    # دمج المعلمات باستخدام الرمز params=
+    final_dashboard_url = f"{LOOKER_BASE_URL}?params={encoded_params}"
     
     st.markdown(
         f"""
