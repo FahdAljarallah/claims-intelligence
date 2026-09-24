@@ -126,8 +126,7 @@ def parse_single_file(file_bytes, file_name, total_members):
 
     current_section = "monthly"
     current_policy_year = ""
-    current_class_tier = "VIP"
-    class_captured = False  # لضمان عدم تلوث اسم الفئة بتكرار القراءة
+    current_class_tier = "CLASS VIP"
     
     for row in all_structured_rows:
         row_tokens = [w['text'] for w in row]
@@ -141,26 +140,26 @@ def parse_single_file(file_bytes, file_name, total_members):
             current_policy_year = row_text.strip()
             continue
             
-        # التقاط الفئة نظيفة مرة واحدة فقط لمنع تراكم النصوص أو ظهور حروف غريبة
-        if ("class" in line_lower or "الفئة" in line_lower) and not class_captured:
-            tokens_after_class = []
-            capture = False
-            for t in row_tokens:
-                if capture and t.lower() not in [':', '-']:
-                    tokens_after_class.append(t)
-                if 'class' in t.lower() or 'الفئة' in t:
-                    capture = True
+        # رصد الفئات المتعددة بمرونة تامة دون تثبيت
+        if "class" in line_lower or "tier" in line_lower or "الفئة" in line_lower:
+            clean_class = re.sub(r'(class\s*type|class\s*tier|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
+            if not clean_class and ":" in row_text:
+                clean_class = row_text.split(":")[-1].strip()
             
-            clean_class = " ".join(tokens_after_class).strip(' .:-')
-            if not clean_class:
-                clean_class = re.sub(r'(class\s*type|class\s*tier|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
+            if "class" in row_text.lower() and not clean_class.lower().startswith("class"):
+                match_class_full = re.search(r'(class\b.*)', row_text, flags=re.IGNORECASE)
+                if match_class_full:
+                    clean_class = match_class_full.group(1).strip()
             
-            if clean_class and "confidential" not in clean_class.lower() and "expiry" not in clean_class.lower():
-                clean_class = re.sub(r'\d{2}[-/]\d{2}[-/]\d{4}', '', clean_class).strip(' .:-')
+            if clean_class and "confidential" not in clean_class.lower():
+                clean_class = re.sub(r'\.$', '', clean_class).strip()
                 if clean_class:
-                    current_class_tier = clean_class.upper()
-                    class_captured = True
+                    current_class_tier = clean_class
             continue
+        elif current_class_tier and not any(k in line_lower for k in ["monthly claim", "breakdown", "top 20", "limit", "coinsurance"]) and len(row_text) > 5 and not re.search(r'\b(20\d{2})\b', row_text):
+            if any(w in line_lower for w in ["female", "male", "employee", "without", "divorced", "single"]):
+                current_class_tier = current_class_tier + " - " + row_text.strip().rstrip(' .')
+                continue
             
         if ("breakdown" in line_lower and "benefit" in line_lower) or any(k in line_lower for k in ["التوزيع حسب المنفعة"]):
             current_section = "benefit"
@@ -176,7 +175,7 @@ def parse_single_file(file_bytes, file_name, total_members):
 
         created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
         
-        # 1. القسم الأول: Monthly Claims (تجاهل رقم الترتيب الافتتاحى واستقرار الأعمدة)
+        # 1. القسم الأول: Monthly Claims
         if current_section == "monthly":
             if "number of lives at start" in line_lower or "lives at start" in line_lower:
                 nums_lives = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
@@ -209,7 +208,6 @@ def parse_single_file(file_bytes, file_name, total_members):
                 else:
                     row_date = row_text[:15].strip()
                 
-                # تصفية التوكنات لتجاهل رقم الفهرس الافتتاحي (مثل السطر '1') وتواريخ الإغلاق
                 filtered_tokens = []
                 for idx, t in enumerate(row_tokens):
                     if idx == 0 and t in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']:
@@ -348,7 +346,7 @@ if uploaded_files:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة كافة الملفات المرفوعة واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة كافة الأقسام وضبط محاذاة السطر الأول واسم الفئة بدقة..."):
+        with st.spinner("جاري قراءة كافة الأقسام وضبط الفئات المتعددة بدقة تامة..."):
             all_dfs = []
             for uploaded_file in uploaded_files:
                 file_bytes = uploaded_file.read()
