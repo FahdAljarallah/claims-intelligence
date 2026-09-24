@@ -168,7 +168,7 @@ def parse_single_file(file_bytes, file_name, total_members):
 
         created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
         
-        # 1. القسم الأول: Monthly Claims (استبعاد تاريخ الشهر من أرقام الحسابات)
+        # 1. القسم الأول: Monthly Claims
         if current_section == "monthly":
             if "number of lives at start" in line_lower or "lives at start" in line_lower:
                 nums_lives = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
@@ -236,21 +236,21 @@ def parse_single_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit
+        # 2. القسم الثاني: Breakdown by Benefit (شامل لجميع المنافع دون استثناء)
         elif current_section == "benefit":
-            benefit_label = None
+            benefit_label = "General Benefit"
             line_full_lower = row_text.lower()
             
-            if "mat" in line_full_lower or "maternity" in line_full_lower:
-                benefit_label = "Maternity"
-            elif "out" in line_full_lower or "out-patient" in line_full_lower:
+            if "out" in line_full_lower or "out-patient" in line_full_lower or "basic coverage (out" in line_full_lower:
                 benefit_label = "Basic Coverage (Out-Patient)"
-            elif "in" in line_full_lower or "in-patient" in line_full_lower:
+            elif "in" in line_full_lower or "in-patient" in line_full_lower or "basic coverage (in" in line_full_lower:
                 benefit_label = "Basic Coverage (In-Patient)"
-            elif "dental" in line_full_lower:
+            elif "dental" in line_full_lower or "dent" in line_full_lower:
                 benefit_label = "Dental"
-            elif "optical" in line_full_lower:
+            elif "optical" in line_full_lower or "opt" in line_full_lower:
                 benefit_label = "Optical"
+            elif "mat" in line_full_lower or "maternity" in line_full_lower:
+                benefit_label = "Maternity"
             elif "lab" in line_full_lower:
                 benefit_label = "Lab"
             elif "consultation" in line_full_lower or "consulation" in line_full_lower:
@@ -262,7 +262,7 @@ def parse_single_file(file_bytes, file_name, total_members):
 
             nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
             
-            if nums and len(nums) >= 4 and benefit_label:
+            if nums and len(nums) >= 4:
                 benefit_rows.append({
                     "created_at": created_at_ts,
                     "policy_year": current_policy_year,
@@ -339,7 +339,7 @@ if uploaded_files:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة كافة الملفات المرفوعة واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة كافة الأقسام وضبط محاذاة الأعمدة الشهرية..."):
+        with st.spinner("جاري قراءة كافة الأقسام وجلب كافة تفاصيل المنافع..."):
             all_dfs = []
             for uploaded_file in uploaded_files:
                 file_bytes = uploaded_file.read()
