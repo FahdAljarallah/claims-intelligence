@@ -32,16 +32,13 @@ def clean_number(val):
         return 0.0
 
 def extract_structured_rows_from_pdf_bytes(file_bytes):
-    """استخراج النصوص خطوة بخطوة من ملف PDF رقمي أو مرئي بنظام هجين"""
     all_structured_rows = []
     
-    # المحاولة الأولى: استخراج النصوص المباشرة (Digital-Native PDF) باستخدام pdfplumber
     try:
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
                 words = page.extract_words(use_text_flow=True)
                 if words:
-                    # تجميع الكلمات إلى صفوف بناءً على إحداثيات الـ top
                     page_words = []
                     for w in words:
                         page_words.append({
@@ -75,7 +72,6 @@ def extract_structured_rows_from_pdf_bytes(file_bytes):
     except Exception:
         pass
 
-    # إذا لم يتم العثور على نص مباشر، نلجأ فوراً لمحرك الـ OCR المكاني للصور الممسوحة
     if not all_structured_rows:
         try:
             images = pdf2image.convert_from_bytes(file_bytes)
@@ -176,7 +172,7 @@ def parse_single_file(file_bytes, file_name, total_members):
         
         # 1. القسم الأول: Monthly Claims
         if current_section == "monthly":
-            if "number of lives at start" in line_lower:
+            if "number of lives at start" in line_lower or "lives at start" in line_lower:
                 nums_lives = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
                 lives_val = int(nums_lives[0]) if nums_lives else int(total_members)
                 monthly_rows.append({
@@ -196,24 +192,18 @@ def parse_single_file(file_bytes, file_name, total_members):
                 })
                 continue
 
-            date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', row_text)
+            date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\/\-\s]*(20\d{2})\b', line_lower)
             if date_match:
                 if date_match.group(1) and date_match.group(2):
                     m_val, y_val = int(date_match.group(1)), int(date_match.group(2))
                     row_date = f"{y_val}-{str(m_val).zfill(2)}"
-                else:
+                elif date_match.group(3) and date_match.group(4):
                     y_val, m_val = int(date_match.group(3)), int(date_match.group(4))
                     row_date = f"{y_val}-{str(m_val).zfill(2)}"
+                else:
+                    row_date = row_text[:15].strip()
                 
-                filtered_tokens = []
-                date_excluded = False
-                for t in row_tokens:
-                    if not date_excluded and re.search(r'\b(0?[1-9]|1[0-2])[\/\-]20\d{2}\b|\b20\d{2}[\/\-](0?[1-9]|1[0-2])\b', t):
-                        date_excluded = True
-                        continue
-                    filtered_tokens.append(t)
-                
-                nums = [clean_number(t) for t in filtered_tokens if re.search(r'\d', t)]
+                nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
                 
                 if nums:
                     active_lives_val = int(nums[0]) if len(nums) > 0 else int(total_members)
@@ -337,14 +327,13 @@ with col_4:
 
 table_id_input = st.text_input("BigQuery Table ID", value="monthly_performance")
 
-# دعم رفع عدة ملفات PDF دفعة واحدة
 uploaded_files = st.file_uploader("رفع تقارير المطالبات المالية للشركة (PDF - متعدد)", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة كافة الملفات المرفوعة واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة الملفات (النظيفة والمسح الضوئي) ودمج البيانات..."):
+        with st.spinner("جاري قراءة كافة الأقسام (Monthly Claims, Breakdown, Providers) ودمج البيانات..."):
             all_dfs = []
             for uploaded_file in uploaded_files:
                 file_bytes = uploaded_file.read()
@@ -392,7 +381,7 @@ if uploaded_files:
                 label="📥 تحميل التقرير المدمج الكامل بصيغة (CSV)",
                 data=csv_export,
                 file_name=f"claims_export_all_{tenant_id}.csv",
-                mime="text/csv",
+                mime="text/css",
                 use_container_width=True
             )
             
