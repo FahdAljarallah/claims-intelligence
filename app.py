@@ -140,7 +140,6 @@ def parse_single_file(file_bytes, file_name, total_members):
             current_policy_year = row_text.strip()
             continue
             
-        # رصد الفئات المتعددة بمرونة تامة دون تثبيت
         if "class" in line_lower or "tier" in line_lower or "الفئة" in line_lower:
             clean_class = re.sub(r'(class\s*type|class\s*tier|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
@@ -243,14 +242,18 @@ def parse_single_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit
+        # 2. القسم الثاني: Breakdown by Benefit (استخراج آخر 6 أرقام لتجاوز الخلايا الفارغة + شمول كامل للمنافع)
         elif current_section == "benefit":
-            benefit_label = None
-            line_full_lower = row_text.lower()
+            all_nums = [(idx, clean_number(t), t) for idx, t in enumerate(row_tokens) if re.search(r'\d', t)]
             
-            if "out" in line_full_lower or "out-patient" in line_full_lower or "basic coverage (out" in line_full_lower:
+            if len(all_nums) < 3 or "benefit" in line_lower or "confidential" in line_lower or "page" in line_lower:
+                continue
+
+            benefit_label = "General Benefit"
+            line_full_lower = row_text.lower()
+            if "out" in line_full_lower or "out-patient" in line_full_lower:
                 benefit_label = "Basic Coverage (Out-Patient)"
-            elif "in" in line_full_lower or "in-patient" in line_full_lower or "basic coverage (in" in line_full_lower:
+            elif "in" in line_full_lower or "in-patient" in line_full_lower:
                 benefit_label = "Basic Coverage (In-Patient)"
             elif "dental" in line_full_lower or "dent" in line_full_lower:
                 benefit_label = "Dental"
@@ -267,25 +270,25 @@ def parse_single_file(file_bytes, file_name, total_members):
             elif "total" in line_full_lower or "الإجمالي" in line_full_lower:
                 benefit_label = "Total"
 
-            nums = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
-            
-            if nums and len(nums) >= 4 and benefit_label:
-                benefit_rows.append({
-                    "created_at": created_at_ts,
-                    "policy_year": current_policy_year or "LAST POLICY YEAR",
-                    "table_header": file_name,
-                    "month_code": "Benefit Summary",
-                    "class_tier": current_class_tier,
-                    "active_lives": 0,
-                    "claims_count": int(nums[0]),
-                    "paid_claims_sar": float(nums[1]),
-                    "paid_claims_vat_sar": float(nums[2]),
-                    "OS_claims_count": int(nums[3]),
-                    "OS paid_claims_sar": float(nums[4]) if len(nums) > 4 else 0.0,
-                    "OS paid_claims_vat_sar": float(nums[5]) if len(nums) > 5 else 0.0,
-                    "section_type": "Breakdown by Benefit",
-                    "benefit_name": benefit_label
-                })
+            metrics_nums = all_nums[-6:] if len(all_nums) >= 6 else all_nums
+            real_nums = [item[1] for item in metrics_nums]
+
+            benefit_rows.append({
+                "created_at": created_at_ts,
+                "policy_year": current_policy_year or "LAST POLICY YEAR",
+                "table_header": file_name,
+                "month_code": "Benefit Summary",
+                "class_tier": current_class_tier,
+                "active_lives": 0,
+                "claims_count": int(real_nums[0]) if len(real_nums) > 0 else 0,
+                "paid_claims_sar": float(real_nums[1]) if len(real_nums) > 1 else 0.0,
+                "paid_claims_vat_sar": float(real_nums[2]) if len(real_nums) > 2 else 0.0,
+                "OS_claims_count": int(real_nums[3]) if len(real_nums) > 3 else 0,
+                "OS paid_claims_sar": float(real_nums[4]) if len(real_nums) > 4 else 0.0,
+                "OS paid_claims_vat_sar": float(real_nums[5]) if len(real_nums) > 5 else 0.0,
+                "section_type": "Breakdown by Benefit",
+                "benefit_name": benefit_label
+            })
         
         # 3. القسم الثالث: Top 20 Providers
         elif current_section == "providers":
@@ -346,7 +349,7 @@ if uploaded_files:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة كافة الملفات المرفوعة واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة كافة الأقسام وضبط الفئات المتعددة بدقة تامة..."):
+        with st.spinner("جاري قراءة كافة الأقسام وضبط بنود المنافع بدقة تامة..."):
             all_dfs = []
             for uploaded_file in uploaded_files:
                 file_bytes = uploaded_file.read()
