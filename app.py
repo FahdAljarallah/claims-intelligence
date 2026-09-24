@@ -20,7 +20,13 @@ st.set_page_config(page_title="مرصد المطالبات التأمينية ا
 PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
 TABLE_ID = "monthly_performance"
+# تحديث رابط لوحة القيادة ليتوافق مع اسم البارامتر الموجود في Looker Studio (p_session_id)
 LOOKER_BASE_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
+
+# في جزء توليد الرابط داخل الكود، تأكد من استخدام المفتاح الصحيح:
+params = {"p_session_id": current_sess}
+encoded_params = urllib.parse.urlencode(params)
+final_dashboard_url = f"{LOOKER_BASE_URL}?{encoded_params}"
 
 @st.cache_resource
 def get_bq_client():
