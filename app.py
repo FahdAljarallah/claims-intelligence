@@ -20,13 +20,8 @@ st.set_page_config(page_title="مرصد المطالبات التأمينية ا
 PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
 TABLE_ID = "monthly_performance"
-# تحديث رابط لوحة القيادة ليتوافق مع اسم البارامتر الموجود في Looker Studio (p_session_id)
+# رابط لوحة القيادة الأساسي
 LOOKER_BASE_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
-
-# في جزء توليد الرابط داخل الكود، تأكد من استخدام المفتاح الصحيح:
-params = {"p_session_id": current_sess}
-encoded_params = urllib.parse.urlencode(params)
-final_dashboard_url = f"{LOOKER_BASE_URL}?{encoded_params}"
 
 @st.cache_resource
 def get_bq_client():
@@ -225,7 +220,6 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     df_res = pd.DataFrame(monthly_rows + benefit_rows + provider_rows)
     if not df_res.empty:
-        # تطهير وتنقية القيم الفارغة والـ NaN وتحويلها إلى None لضمان سلامة JSON payload لـ BigQuery
         df_res = df_res.replace({np.nan: None, pd.NA: None})
         for col in df_res.columns:
             if df_res[col].dtype == object:
@@ -265,25 +259,26 @@ if uploaded_files:
             else:
                 st.warning("تعذر استخراج بيانات من الملفات المرفوعة، تأكد من صحة الملفات.")
 
-    if "active_session_id" in st.session_state:
-        current_sess = st.session_state["active_session_id"]
-        
-        st.markdown("---")
-        st.info(f"🔑 **رمز الجلسة الفعّال:** `{current_sess}`")
-        
-        params = {f"df_session_id": current_sess}
-        encoded_params = urllib.parse.urlencode(params)
-        final_dashboard_url = f"{LOOKER_BASE_URL}?{encoded_params}"
-        
-        st.markdown(
-            f"""
-            <div style="text-align: center; padding: 20px;">
-                <a href="{final_dashboard_url}" target="_blank">
-                    <button style="background-color: #0083B8; color: white; font-size: 20px; padding: 12px 35px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                        🚀 عرض لوحة القرار التنفيذي التفاعلية
-                    </button>
-                </a>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+if "active_session_id" in st.session_state:
+    current_sess = st.session_state["active_session_id"]
+    
+    st.markdown("---")
+    st.info(f"🔑 **رمز الجلسة الفعّال:** `{current_sess}`")
+    
+    # تمرير البارامتر الصحيح الذي يتوقعه Looker Studio
+    params = {"p_session_id": current_sess}
+    encoded_params = urllib.parse.urlencode(params)
+    final_dashboard_url = f"{LOOKER_BASE_URL}?{encoded_params}"
+    
+    st.markdown(
+        f"""
+        <div style="text-align: center; padding: 20px;">
+            <a href="{final_dashboard_url}" target="_blank">
+                <button style="background-color: #0083B8; color: white; font-size: 20px; padding: 12px 35px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                    🚀 عرض لوحة القرار التنفيذي التفاعلية
+                </button>
+            </a>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
