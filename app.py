@@ -20,7 +20,8 @@ st.set_page_config(page_title="مرصد المطالبات التأمينية ا
 PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
 TABLE_ID = "monthly_performance"
-# رابط لوحة القيادة الأساسي
+
+# رابط لوحة القيادة الأساسي المعتمد لـ Looker Studio
 LOOKER_BASE_URL = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
 
 @st.cache_resource
@@ -265,10 +266,8 @@ if "active_session_id" in st.session_state:
     st.markdown("---")
     st.info(f"🔑 **رمز الجلسة الفعّال:** `{current_sess}`")
     
-    # تمرير البارامتر الصحيح الذي يتوقعه Looker Studio
-    params = {"p_session_id": current_sess}
-    encoded_params = urllib.parse.urlencode(params)
-    final_dashboard_url = f"{LOOKER_BASE_URL}?{encoded_params}"
+    # تركيب رابط Looker Studio بالصيغة القياسية السليمة لتمرير بارامتر الفلترة
+    final_dashboard_url = f"{LOOKER_BASE_URL}?p_session_id={current_sess}"
     
     st.markdown(
         f"""
