@@ -127,6 +127,7 @@ def parse_single_file(file_bytes, file_name, total_members):
     current_section = "monthly"
     current_policy_year = ""
     current_class_tier = "VIP"
+    class_captured = False  # لضمان عدم تلوث اسم الفئة بتكرار القراءة
     
     for row in all_structured_rows:
         row_tokens = [w['text'] for w in row]
@@ -140,7 +141,8 @@ def parse_single_file(file_bytes, file_name, total_members):
             current_policy_year = row_text.strip()
             continue
             
-        if "class" in line_lower or "الفئة" in line_lower:
+        # التقاط الفئة نظيفة مرة واحدة فقط لمنع تراكم النصوص أو ظهور حروف غريبة
+        if ("class" in line_lower or "الفئة" in line_lower) and not class_captured:
             tokens_after_class = []
             capture = False
             for t in row_tokens:
@@ -157,11 +159,8 @@ def parse_single_file(file_bytes, file_name, total_members):
                 clean_class = re.sub(r'\d{2}[-/]\d{2}[-/]\d{4}', '', clean_class).strip(' .:-')
                 if clean_class:
                     current_class_tier = clean_class.upper()
+                    class_captured = True
             continue
-        elif current_class_tier and not any(k in line_lower for k in ["monthly claim", "breakdown", "top 20", "limit", "coinsurance"]) and len(row_text) > 5 and not re.search(r'\b(20\d{2})\b', row_text):
-            if any(w in line_lower for w in ["female", "male", "employee", "without", "divorced", "single"]):
-                current_class_tier = current_class_tier + " - " + row_text.strip().rstrip(' .')
-                continue
             
         if ("breakdown" in line_lower and "benefit" in line_lower) or any(k in line_lower for k in ["التوزيع حسب المنفعة"]):
             current_section = "benefit"
@@ -177,7 +176,7 @@ def parse_single_file(file_bytes, file_name, total_members):
 
         created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
         
-        # 1. القسم الأول: Monthly Claims (حماية ضد تداخل أرقام التواريخ والبيانات العلوية)
+        # 1. القسم الأول: Monthly Claims (تجاهل رقم الترتيب الافتتاحى واستقرار الأعمدة)
         if current_section == "monthly":
             if "number of lives at start" in line_lower or "lives at start" in line_lower:
                 nums_lives = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
@@ -210,25 +209,25 @@ def parse_single_file(file_bytes, file_name, total_members):
                 else:
                     row_date = row_text[:15].strip()
                 
+                # تصفية التوكنات لتجاهل رقم الفهرس الافتتاحي (مثل السطر '1') وتواريخ الإغلاق
                 filtered_tokens = []
-                for t in row_tokens:
-                    if re.search(r'\b(0?[1-9]|1[0-2])[\/\-]20\d{2}\b|\b20\d{2}[\/\-](0?[1-9]|1[0-2])\b|\b(30|31|28|29)[-/]', t):
+                for idx, t in enumerate(row_tokens):
+                    if idx == 0 and t in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']:
+                        continue
+                    if re.search(r'\b(0?[1-9]|1[0-2])[\/\-]20\d{2}\b|\b20\d{2}[\/\-](0?[1-9]|1[0-2])\b', t):
                         continue
                     filtered_tokens.append(t)
                 
                 nums = [clean_number(t) for t in filtered_tokens if re.search(r'\d', t)]
                 
                 if nums:
-                    potential_lives = int(nums[0]) if len(nums) > 0 else int(total_members)
-                    active_lives_val = potential_lives if potential_lives > 10 else int(total_members)
-                    offset = 0 if potential_lives > 10 else 1
-                    
-                    claims_cnt_val = int(nums[1 - offset]) if len(nums) > (1 - offset) else 0
-                    p_sar = float(nums[2 - offset]) if len(nums) > (2 - offset) else 0.0
-                    p_vat = float(nums[3 - offset]) if len(nums) > (3 - offset) else 0.0
-                    os_cnt = int(nums[4 - offset]) if len(nums) > (4 - offset) else 0
-                    os_sar = float(nums[5 - offset]) if len(nums) > (5 - offset) else 0.0
-                    os_vat = float(nums[6 - offset]) if len(nums) > (6 - offset) else 0.0
+                    active_lives_val = int(nums[0]) if len(nums) > 0 else int(total_members)
+                    claims_cnt_val = int(nums[1]) if len(nums) > 1 else 0
+                    p_sar = float(nums[2]) if len(nums) > 2 else 0.0
+                    p_vat = float(nums[3]) if len(nums) > 3 else 0.0
+                    os_cnt = int(nums[4]) if len(nums) > 4 else 0
+                    os_sar = float(nums[5]) if len(nums) > 5 else 0.0
+                    os_vat = float(nums[6]) if len(nums) > 6 else 0.0
 
                     monthly_rows.append({
                         "created_at": created_at_ts,
@@ -349,7 +348,7 @@ if uploaded_files:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة كافة الملفات المرفوعة واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة كافة الأقسام وتصفية البيانات العلوية بدقة تامة..."):
+        with st.spinner("جاري قراءة كافة الأقسام وضبط محاذاة السطر الأول واسم الفئة بدقة..."):
             all_dfs = []
             for uploaded_file in uploaded_files:
                 file_bytes = uploaded_file.read()
