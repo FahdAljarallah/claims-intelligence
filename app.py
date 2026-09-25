@@ -398,7 +398,7 @@ if uploaded_files:
                         st.success(f"تم رفع كافة البيانات بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
                         
                         # توليد رابط Looker Studio بالصيغة المباشرة للبارامتر
-                        base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
+                      base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
                         params = {"ds14.p_client_session": current_sess}
                         looker_url = f"{base_url}?{urllib.parse.urlencode(params)}"
                         
