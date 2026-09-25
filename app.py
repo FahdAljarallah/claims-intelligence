@@ -126,6 +126,7 @@ def parse_single_file(file_bytes, file_name, total_members):
 
     current_section = "monthly"
     current_policy_year = ""
+    current_inception = ""
     current_class_tier = "CLASS VIP"
     
     for row in all_structured_rows:
@@ -138,6 +139,13 @@ def parse_single_file(file_bytes, file_name, total_members):
             
         if "policy year" in line_lower or "last policy year" in line_lower or "سنة الوثيقة" in line_lower:
             current_policy_year = row_text.strip()
+            continue
+            
+        # التقاط تاريخ البداية (Inception Date) من الترويسة العلوية
+        if "inception" in line_lower:
+            date_m = re.search(r'\b(0?[1-9]|[12][0-9]|3[01])[-/](0?[1-9]|1[0-2])[-/](20\d{2})\b', row_text)
+            if date_m:
+                current_inception = date_m.group(0)
             continue
             
         if "class" in line_lower or "tier" in line_lower or "الفئة" in line_lower:
@@ -182,6 +190,7 @@ def parse_single_file(file_bytes, file_name, total_members):
                 monthly_rows.append({
                     "created_at": created_at_ts,
                     "policy_year": current_policy_year or "LAST POLICY YEAR",
+                    "inception_date": current_inception or "",
                     "table_header": file_name,
                     "month_code": "Number of lives at start",
                     "class_tier": current_class_tier,
@@ -229,6 +238,7 @@ def parse_single_file(file_bytes, file_name, total_members):
                     monthly_rows.append({
                         "created_at": created_at_ts,
                         "policy_year": current_policy_year or "LAST POLICY YEAR",
+                        "inception_date": current_inception or "",
                         "table_header": file_name,
                         "month_code": row_date,
                         "class_tier": current_class_tier,
@@ -242,7 +252,7 @@ def parse_single_file(file_bytes, file_name, total_members):
                         "section_type": "Monthly Claims"
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit (إدراج صفر تعويضي عند وجود خلية فارغة وضبط مفتاح الاستشارة)
+        # 2. القسم الثاني: Breakdown by Benefit
         elif current_section == "benefit":
             all_nums = [(idx, clean_number(t), t) for idx, t in enumerate(row_tokens) if re.search(r'\d', t)]
             
@@ -279,6 +289,7 @@ def parse_single_file(file_bytes, file_name, total_members):
             benefit_rows.append({
                 "created_at": created_at_ts,
                 "policy_year": current_policy_year or "LAST POLICY YEAR",
+                "inception_date": current_inception or "",
                 "table_header": file_name,
                 "month_code": "Benefit Summary",
                 "class_tier": current_class_tier,
@@ -313,6 +324,7 @@ def parse_single_file(file_bytes, file_name, total_members):
             provider_rows.append({
                 "created_at": created_at_ts,
                 "policy_year": current_policy_year or "LAST POLICY YEAR",
+                "inception_date": current_inception or "",
                 "table_header": file_name,
                 "class_tier": current_class_tier,
                 "claims_count": int(real_nums[0]) if len(real_nums) > 0 else 0,
@@ -330,7 +342,7 @@ def parse_single_file(file_bytes, file_name, total_members):
 
 # واجهة Streamlit ديناميكية بالكامل لدعم الملفات المتعددة
 st.title("مرصد المطالبات التأمينية | المعاينة والربط الذكي")
-st.markdown("استخراج الأقسام الثلاثة ديناميكياً ودعم رفع ملفات متعددة (Digital-Native & Scanned PDFs).")
+st.markdown("استخراج الأقسام الثلاثة ديناميكياً وعمود تاريخ البداية (Inception Date) مع دعم رفع ملفات متعددة.")
 
 col_1, col_2 = st.columns(2)
 with col_1:
@@ -352,7 +364,7 @@ if uploaded_files:
     tenant_id = f"tenant_{abs(hash(company_name))}"
     
     if st.button("معالجة كافة الملفات المرفوعة واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة كافة الأقسام ومعالجة خلايا المنافع الفارغة بدقة تامة..."):
+        with st.spinner("جاري قراءة كافة الأقسام والتقاط تاريخ البداية (Inception Date)..."):
             all_dfs = []
             for uploaded_file in uploaded_files:
                 file_bytes = uploaded_file.read()
