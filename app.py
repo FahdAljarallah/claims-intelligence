@@ -91,7 +91,6 @@ def parse_single_file(file_bytes, file_name, session_id):
     if not all_structured_rows: return pd.DataFrame()
 
     current_section, current_policy_year, current_inception, current_class_tier = "monthly", "", "", "CLASS VIP"
-    detected_months = []
     temp_monthly_records = []
     
     for row in all_structured_rows:
@@ -155,7 +154,6 @@ def parse_single_file(file_bytes, file_name, session_id):
             date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', line_lower)
             if date_match:
                 row_date = f"{date_match.group(2)}-{date_match.group(1).zfill(2)}" if date_match.group(1) else f"{date_match.group(3)}-{date_match.group(4).zfill(2)}"
-                detected_months.append(row_date)
                 
                 filtered_tokens = [t for idx, t in enumerate(row_tokens) if not (idx == 0 and t in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']) and not re.search(r'\b(0?[1-9]|1[0-2])[\/\-]20\d{2}\b', t)]
                 nums = [clean_number(t) for t in filtered_tokens if re.search(r'\d', t)]
@@ -241,11 +239,12 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     df_temp_m = pd.DataFrame(monthly_rows)
     if not df_temp_m.empty and 'month_code' in df_temp_m.columns:
-        # فحص مستقل ودقيق لعدد الأشهر الفعلية لكل ملف على حدة
+        # العد الفعلي الدقيق للأشهر الفريدة لكل ملف على حدة (أكثر من 12 شهر يعني 13، وإلا 12)
         file_contract_durations = {}
         for file_name_key, group_df in df_temp_m.groupby('table_header'):
             m_list = [m for m in group_df['month_code'].unique() if m != 'Number of lives at start']
-            if len(m_list) > 12 or (len(m_list) >= 2 and m_list[0] == m_list[-1]):
+            # الشرط الأدق: إذا كان عدد الأشهر الفريدة الفعلية يفوق 12 شهراً
+            if len(m_list) > 12:
                 file_contract_durations[file_name_key] = "13 Months"
             else:
                 file_contract_durations[file_name_key] = "12 Months"
