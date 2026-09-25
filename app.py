@@ -239,16 +239,15 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     df_temp_m = pd.DataFrame(monthly_rows)
     if not df_temp_m.empty and 'month_code' in df_temp_m.columns:
-        # العد الدقيق بالاعتماد حصرياً على أشهر الشهور النظامية بصيغة YYYY-MM
+        # التصحيح الحاسم: عد الشهور الفرعية النظامية بدقة، فإذا كانت 12 أو أقل يصبح العقد 12 شهراً، وإن زادت عن 12 يصبح 13 شهراً
         file_contract_durations = {}
         for file_name_key, group_df in df_temp_m.groupby('table_header'):
-            # استخراج الأشهُر الفرعية التي تطابق صيغة التاريخ فقط (YYYY-MM)
-            valid_calendar_months = [
+            valid_calendar_months = sorted(list({
                 m for m in group_df['month_code'].unique() 
                 if m and isinstance(m, str) and re.match(r'^\d{4}-\d{2}$', m.strip())
-            ]
+            }))
             
-            # إذا كان عدد الشهر الفعلية النظامية يفوق 12، يعتبر العقد 13 شهراً، وإلا 12 شهراً
+            # إذا كان عدد الشهور الفرعية الفعلية أكبر من 12، فهذا يعني وجود تكرار أو 13 شهراً
             if len(valid_calendar_months) > 12:
                 file_contract_durations[file_name_key] = "13 Months"
             else:
