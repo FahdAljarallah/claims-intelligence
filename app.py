@@ -15,7 +15,6 @@ from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="مرصد المطالبات التأمينية الذكي", page_icon="📊", layout="wide")
 
-# الثوابت المعتمدة للربط بـ BigQuery (خلف الكواليس)
 PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
 TABLE_ID = "monthly_performance"
@@ -357,7 +356,6 @@ def parse_single_file(file_bytes, file_name, session_id):
     all_rows = monthly_rows + benefit_rows + provider_rows
     return pd.DataFrame(all_rows)
 
-# واجهة Streamlit الإنتاجية النظيفة
 st.title("مرصد المطالبات التأمينية الذكي")
 st.markdown("استخراج الأقسام الثلاثة تلقائياً وضخ البيانات الآمن إلى BigQuery مع تتبع الجلسات.")
 
@@ -418,9 +416,18 @@ if uploaded_files:
             if st.button("🚀 تنفيذ الضخ المباشر إلى جدول BigQuery", type="secondary", use_container_width=True):
                 with st.spinner("جاري الإرسال الآمن إلى الجدول المركزي..."):
                     try:
+                        # تنظيف البيانات لتعويض أي NaN بـ None ليتوافق مع JSON/BigQuery
+                        df_clean = df_res.where(pd.notnull(df_res), None)
+                        records_to_insert = df_clean.to_dict(orient="records")
+                        for r in records_to_insert:
+                            for k, v in r.items():
+                                if pd.isna(v):
+                                    r[k] = None
+
                         bq_client = get_bq_client(PROJECT_ID)
                         table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
-                        errors = bq_client.insert_rows_json(table_ref, df_res.to_dict(orient="records"))
+                        errors = bq_client.insert_rows_json(table_ref, records_to_insert)
+                        
                         if errors == []:
                             st.success("تم رفع كافة البيانات بنجاح إلى جدول `monthly_performance` وجاهزة للربط الفوري مع Looker Studio!")
                         else:
