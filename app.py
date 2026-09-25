@@ -1,6 +1,7 @@
 import os
 import io
 import uuid
+import json
 import urllib.parse
 import streamlit as st
 import pandas as pd
@@ -396,14 +397,20 @@ if uploaded_files:
                     if errors == []:
                         st.success(f"تم رفع كافة البيانات بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
                         
-                # توليد رابط Looker Studio مع تمرير الجلسة كفلتر مباشر للبيانات
+                        # توليد رابط Looker Studio مع ترميز JSON للبارامتر بالشكل المطابق لمتطلبات Looker Studio
                         base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
-                        # استخدام صيغة الفلتر المباشر المعتمدة في Looker Studio لضمان استجابة الجداول فوراً
-                        looker_url = f"{base_url}?params=%7B%22df5%22:%7B%22include%22:[%7B%22fieldId%22:%22session_id%22,%22operator%22:%22IN%22,%22values%22:[%22{current_sess}%22]%7D%5D%7D%7D"
+                        param_payload = {
+                            "ds14.p_client_session": {
+                                "useDefaultValue": False,
+                                "value": current_sess
+                            }
+                        }
+                        encoded_params = urllib.parse.quote(json.dumps(param_payload))
+                        looker_url = f"{base_url}?params={encoded_params}"
                         
                         st.markdown("---")
                         st.markdown(f"### 📈 تقرير لوحة المؤشرات جاهز:")
-                        st.markdown(f"[اضغط هنا لفتح لوحة البيانات في Looker Studio (مع الجلسة الممررة)]({looker_url})", unsafe_allow_html=True)
+                        st.markdown(f"[اضغط هنا لفتح لوحة البيانات في Looker Studio]({looker_url})", unsafe_allow_html=True)
                     else:
                         st.error(f"خطأ في الحفظ في BigQuery: {errors}")
                 except Exception as e:
