@@ -235,17 +235,23 @@ def parse_single_file(file_bytes, file_name, session_id):
                 "contract_period": "12 Months", "contract_rank": "First"
             })
 
-    # تحديد فترة العقد والترتيب التسلسلي بدقة
-    unique_months = [m for m in detected_months if m != 'Number of lives at start']
-    contract_duration = "13 Months" if (len(unique_months) >= 2 and (unique_months[0] == unique_months[-1] or len(set(unique_months)) > 12)) else "12 Months"
-    period_length = 13 if contract_duration == "13 Months" else 12
-
+    # معالجة الشهور وفترة العقد وتحديد الترتيب التسلسلي بشكل مستقل لكل ملف على حدة
     for rec in temp_monthly_records:
-        rec["contract_period"] = contract_duration
         monthly_rows.append(rec)
 
     df_temp_m = pd.DataFrame(monthly_rows)
     if not df_temp_m.empty and 'month_code' in df_temp_m.columns:
+        # حساب مدة العقد لكل ملف على حدة
+        file_contract_durations = {}
+        for file_name_key, group_df in df_temp_m.groupby('table_header'):
+            m_list = [m for m in group_df['month_code'].unique() if m != 'Number of lives at start']
+            if len(m_list) >= 2 and (m_list[0] == m_list[-1] or len(m_list) > 12):
+                file_contract_durations[file_name_key] = "13 Months"
+            else:
+                file_contract_durations[file_name_key] = "12 Months"
+                
+        df_temp_m['contract_period'] = df_temp_m['table_header'].map(file_contract_durations)
+        
         df_temp_m = df_temp_m.sort_values(by=['table_header', 'class_tier', 'month_code'])
         ranks_list = []
         rank_counter_map = {}
@@ -262,7 +268,9 @@ def parse_single_file(file_bytes, file_name, session_id):
             rank_counter_map[key] += 1
             curr_item_index = rank_counter_map[key]
             
-            group_index = ((curr_item_index - 1) // period_length) + 1
+            period_len = 13 if r['contract_period'] == "13 Months" else 12
+            group_index = ((curr_item_index - 1) // period_len) + 1
+            
             if group_index == 1: ranks_list.append("First")
             elif group_index == 2: ranks_list.append("2nd")
             elif group_index == 3: ranks_list.append("3rd")
