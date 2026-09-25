@@ -5,6 +5,7 @@ import json
 import urllib.parse
 import streamlit as st
 import pandas as pd
+import numpy as np
 import re
 import pdfplumber
 import pdf2image
@@ -235,17 +236,16 @@ def parse_single_file(file_bytes, file_name, session_id):
                 "contract_period": "12 Months", "contract_rank": "First"
             })
 
-    # معالجة الشهور وفترة العقد وتحديد الترتيب التسلسلي بشكل مستقل لكل ملف على حدة
     for rec in temp_monthly_records:
         monthly_rows.append(rec)
 
     df_temp_m = pd.DataFrame(monthly_rows)
     if not df_temp_m.empty and 'month_code' in df_temp_m.columns:
-        # حساب مدة العقد لكل ملف على حدة
+        # فحص مستقل ودقيق لعدد الأشهر الفعلية لكل ملف على حدة
         file_contract_durations = {}
         for file_name_key, group_df in df_temp_m.groupby('table_header'):
             m_list = [m for m in group_df['month_code'].unique() if m != 'Number of lives at start']
-            if len(m_list) >= 2 and (m_list[0] == m_list[-1] or len(m_list) > 12):
+            if len(m_list) > 12 or (len(m_list) >= 2 and m_list[0] == m_list[-1]):
                 file_contract_durations[file_name_key] = "13 Months"
             else:
                 file_contract_durations[file_name_key] = "12 Months"
