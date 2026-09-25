@@ -396,10 +396,10 @@ if uploaded_files:
                     if errors == []:
                         st.success(f"تم رفع كافة البيانات بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
                         
-                        # توليد رابط Looker Studio مع تمرير البارامتر المطلوب
+                # توليد رابط Looker Studio مع تمرير الجلسة كفلتر مباشر للبيانات
                         base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
-                        params = {"ds14.p_client_session": current_sess}
-                        looker_url = f"{base_url}?{urllib.parse.urlencode(params)}"
+                        # استخدام صيغة الفلتر المباشر المعتمدة في Looker Studio لضمان استجابة الجداول فوراً
+                        looker_url = f"{base_url}?params=%7B%22df5%22:%7B%22include%22:[%7B%22fieldId%22:%22session_id%22,%22operator%22:%22IN%22,%22values%22:[%22{current_sess}%22]%7D%5D%7D%7D"
                         
                         st.markdown("---")
                         st.markdown(f"### 📈 تقرير لوحة المؤشرات جاهز:")
