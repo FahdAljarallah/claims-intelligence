@@ -357,12 +357,12 @@ def parse_single_file(file_bytes, file_name, session_id):
     return pd.DataFrame(all_rows)
 
 st.title("مرصد المطالبات التأمينية الذكي")
-st.markdown("استخراج الأقسام الثلاثة تلقائياً وضخ البيانات الآمن إلى BigQuery مع تتبع الجلسات.")
+st.markdown("استخراج الأقسام الثلاثة تلقائياً وضخ البيانات الآمن إلى BigQuery مع تتبع الجلسات المختصرة.")
 
 uploaded_files = st.file_uploader("رفع تقارير المطالبات المالية للشركة (PDF - متعدد)", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
-    session_id = str(uuid.uuid4())
+    session_id = f"sess_{str(uuid.uuid4())[:8]}"
     
     if st.button("معالجة الملفات وضخ البيانات إلى المستودع المركزي", type="primary"):
         with st.spinner("جاري معالجة الملفات واستخراج البيانات بدقة الإنتاج..."):
@@ -416,17 +416,16 @@ if uploaded_files:
             if st.button("🚀 تنفيذ الضخ المباشر إلى جدول BigQuery", type="secondary", use_container_width=True):
                 with st.spinner("جاري الإرسال الآمن إلى الجدول المركزي..."):
                     try:
-                        # تنظيف البيانات لتعويض أي NaN بـ None ليتوافق مع JSON/BigQuery
                         df_clean = df_res.where(pd.notnull(df_res), None)
-                        records_to_insert = df_clean.to_dict(orient="records")
-                        for r in records_to_insert:
+                        records_to_inspect = df_clean.to_dict(orient="records")
+                        for r in records_to_inspect:
                             for k, v in r.items():
                                 if pd.isna(v):
                                     r[k] = None
 
                         bq_client = get_bq_client(PROJECT_ID)
                         table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
-                        errors = bq_client.insert_rows_json(table_ref, records_to_insert)
+                        errors = bq_client.insert_rows_json(table_ref, records_to_inspect)
                         
                         if errors == []:
                             st.success("تم رفع كافة البيانات بنجاح إلى جدول `monthly_performance` وجاهزة للربط الفوري مع Looker Studio!")
