@@ -1,6 +1,7 @@
 import os
 import io
 import uuid
+import urllib.parse
 import streamlit as st
 import pandas as pd
 import re
@@ -357,79 +358,55 @@ def parse_single_file(file_bytes, file_name, session_id):
     return pd.DataFrame(all_rows)
 
 st.title("مرصد المطالبات التأمينية الذكي")
-st.markdown("استخراج الأقسام الثلاثة تلقائياً وضخ البيانات الآمن إلى BigQuery مع تتبع الجلسات المختصرة.")
+st.markdown("رفع تقارير المطالبات ومعالجتها وضخها إلى BigQuery للربط مع Looker Studio.")
 
 uploaded_files = st.file_uploader("رفع تقارير المطالبات المالية للشركة (PDF - متعدد)", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
-    session_id = f"sess_{str(uuid.uuid4())[:8]}"
+    if "current_session_id" not in st.session_state:
+        st.session_state["current_session_id"] = f"sess_{str(uuid.uuid4())[:8]}"
     
-    if st.button("معالجة الملفات وضخ البيانات إلى المستودع المركزي", type="primary"):
-        with st.spinner("جاري معالجة الملفات واستخراج البيانات بدقة الإنتاج..."):
+    current_sess = st.session_state["current_session_id"]
+    st.info(f"🔑 معرف الجلسة الحالي: **{current_sess}**")
+    
+    if st.button("معالجة الملفات وضخ البيانات إلى BigQuery", type="primary"):
+        with st.spinner("جاري معالجة الملفات وضخها إلى المستودع المركزي..."):
             all_dfs = []
             for uploaded_file in uploaded_files:
                 file_bytes = uploaded_file.read()
-                df_single = parse_single_file(file_bytes, uploaded_file.name, session_id)
+                df_single = parse_single_file(file_bytes, uploaded_file.name, current_sess)
                 if not df_single.empty:
                     all_dfs.append(df_single)
             
             if all_dfs:
                 df_actual = pd.concat(all_dfs, ignore_index=True)
-                st.session_state["prod_dash"] = df_actual
-                st.success(f"تمت معالجة كافة الملفات بنجاح! إجمالي السجلات المستخرجة: {len(df_actual)} | معرف الجلسة: {session_id}")
+                
+                try:
+                    df_clean = df_actual.where(pd.notnull(df_actual), None)
+                    records_to_insert = df_clean.to_dict(orient="records")
+                    for r in records_to_insert:
+                        for k, v in r.items():
+                            if pd.isna(v):
+                                r[k] = None
+
+                    bq_client = get_bq_client(PROJECT_ID)
+                    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+                    errors = bq_client.insert_rows_json(table_ref, records_to_insert)
+                    
+                    if errors == []:
+                        st.success(f"تم رفع كافة البيانات بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
+                        
+                        # توليد رابط Looker Studio مع تمرير البارامتر المطلوب
+                        base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
+                        params = {"ds14.p_client_session": current_sess}
+                        looker_url = f"{base_url}?{urllib.parse.urlencode(params)}"
+                        
+                        st.markdown("---")
+                        st.markdown(f"### 📈 تقرير لوحة المؤشرات جاهز:")
+                        st.markdown(f"[اضغط هنا لفتح لوحة البيانات في Looker Studio (مع الجلسة الممررة)]({looker_url})", unsafe_allow_html=True)
+                    else:
+                        st.error(f"خطأ في الحفظ في BigQuery: {errors}")
+                except Exception as e:
+                    st.error(f"فشل الاتصال بقاعدة البيانات: {str(e)}")
             else:
                 st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة.")
-
-    if "prod_dash" in st.session_state and not st.session_state["prod_dash"].empty:
-        df_res = st.session_state["prod_dash"]
-        
-        st.markdown("---")
-        st.subheader("📋 معاينة البيانات المدمجة الجاهزة للضخ")
-        
-        tab1, tab2, tab3 = st.tabs([
-            "📅 Monthly Claims", 
-            "🏥 Breakdown by Benefit", 
-            "🏆 Top 20 Providers"
-        ])
-        
-        with tab1:
-            st.dataframe(df_res[df_res['section_type'] == 'Monthly Claims'], use_container_width=True)
-        with tab2:
-            st.dataframe(df_res[df_res['section_type'] == 'Breakdown by Benefit'], use_container_width=True)
-        with tab3:
-            st.dataframe(df_res[df_res['section_type'] == 'Top 20 Providers'], use_container_width=True)
-        
-        st.markdown("---")
-        col_dl, col_bq = st.columns(2)
-        
-        with col_dl:
-            csv_export = df_res.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 تحميل ملف (CSV)",
-                data=csv_export,
-                file_name=f"claims_export_{session_id}.csv",
-                mime="text/css",
-                use_container_width=True
-            )
-            
-        with col_bq:
-            if st.button("🚀 تنفيذ الضخ المباشر إلى جدول BigQuery", type="secondary", use_container_width=True):
-                with st.spinner("جاري الإرسال الآمن إلى الجدول المركزي..."):
-                    try:
-                        df_clean = df_res.where(pd.notnull(df_res), None)
-                        records_to_inspect = df_clean.to_dict(orient="records")
-                        for r in records_to_inspect:
-                            for k, v in r.items():
-                                if pd.isna(v):
-                                    r[k] = None
-
-                        bq_client = get_bq_client(PROJECT_ID)
-                        table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
-                        errors = bq_client.insert_rows_json(table_ref, records_to_inspect)
-                        
-                        if errors == []:
-                            st.success("تم رفع كافة البيانات بنجاح إلى جدول `monthly_performance` وجاهزة للربط الفوري مع Looker Studio!")
-                        else:
-                            st.error(f"خطأ في الحفظ: {errors}")
-                    except Exception as e:
-                        st.error(f"فشل الاتصال بقاعدة البيانات: {str(e)}")
