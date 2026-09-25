@@ -1,5 +1,6 @@
 import os
 import io
+import uuid
 import streamlit as st
 import pandas as pd
 import re
@@ -13,6 +14,11 @@ from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="مرصد المطالبات التأمينية الذكي", page_icon="📊", layout="wide")
+
+# الثوابت المعتمدة للربط بـ BigQuery (خلف الكواليس)
+PROJECT_ID = "claims-intelligence-507611"
+DATASET_ID = "claims_intelligence"
+TABLE_ID = "monthly_performance"
 
 @st.cache_resource
 def get_bq_client(project_id):
@@ -115,7 +121,7 @@ def extract_structured_rows_from_pdf_bytes(file_bytes):
             
     return all_structured_rows
 
-def parse_single_file(file_bytes, file_name, total_members):
+def parse_single_file(file_bytes, file_name, session_id):
     monthly_rows = []
     benefit_rows = []
     provider_rows = []
@@ -141,7 +147,6 @@ def parse_single_file(file_bytes, file_name, total_members):
             current_policy_year = row_text.strip()
             continue
             
-        # التقاط تاريخ البداية (Inception Date) من الترويسة العلوية
         if "inception" in line_lower:
             date_m = re.search(r'\b(0?[1-9]|[12][0-9]|3[01])[-/](0?[1-9]|1[0-2])[-/](20\d{2})\b', row_text)
             if date_m:
@@ -182,26 +187,29 @@ def parse_single_file(file_bytes, file_name, total_members):
 
         created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
         
-        # 1. القسم الأول: Monthly Claims
+        # 1. Monthly Claims
         if current_section == "monthly":
             if "number of lives at start" in line_lower or "lives at start" in line_lower:
                 nums_lives = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
-                lives_val = int(nums_lives[0]) if nums_lives else int(total_members)
+                lives_val = int(nums_lives[0]) if nums_lives else 100
                 monthly_rows.append({
+                    "session_id": session_id,
                     "created_at": created_at_ts,
                     "policy_year": current_policy_year or "LAST POLICY YEAR",
                     "inception_date": current_inception or "",
                     "table_header": file_name,
-                    "month_code": "Number of lives at start",
                     "class_tier": current_class_tier,
+                    "section_type": "Monthly Claims",
+                    "month_code": "Number of lives at start",
                     "active_lives": lives_val,
                     "claims_count": 0,
                     "paid_claims_sar": 0.0,
                     "paid_claims_vat_sar": 0.0,
                     "OS_claims_count": 0,
-                    "OS paid_claims_sar": 0.0,
-                    "OS paid_claims_vat_sar": 0.0,
-                    "section_type": "Monthly Claims"
+                    "OS_paid_claims_sar": 0.0,
+                    "OS_paid_claims_vat_sar": 0.0,
+                    "benefit_name": None,
+                    "provider_name": None
                 })
                 continue
 
@@ -227,7 +235,7 @@ def parse_single_file(file_bytes, file_name, total_members):
                 nums = [clean_number(t) for t in filtered_tokens if re.search(r'\d', t)]
                 
                 if nums:
-                    active_lives_val = int(nums[0]) if len(nums) > 0 else int(total_members)
+                    active_lives_val = int(nums[0]) if len(nums) > 0 else 100
                     claims_cnt_val = int(nums[1]) if len(nums) > 1 else 0
                     p_sar = float(nums[2]) if len(nums) > 2 else 0.0
                     p_vat = float(nums[3]) if len(nums) > 3 else 0.0
@@ -236,23 +244,26 @@ def parse_single_file(file_bytes, file_name, total_members):
                     os_vat = float(nums[6]) if len(nums) > 6 else 0.0
 
                     monthly_rows.append({
+                        "session_id": session_id,
                         "created_at": created_at_ts,
                         "policy_year": current_policy_year or "LAST POLICY YEAR",
                         "inception_date": current_inception or "",
                         "table_header": file_name,
-                        "month_code": row_date,
                         "class_tier": current_class_tier,
+                        "section_type": "Monthly Claims",
+                        "month_code": row_date,
                         "active_lives": active_lives_val,
                         "claims_count": claims_cnt_val,
                         "paid_claims_sar": p_sar,
                         "paid_claims_vat_sar": p_vat,
                         "OS_claims_count": os_cnt,
-                        "OS paid_claims_sar": os_sar,
-                        "OS paid_claims_vat_sar": os_vat,
-                        "section_type": "Monthly Claims"
+                        "OS_paid_claims_sar": os_sar,
+                        "OS_paid_claims_vat_sar": os_vat,
+                        "benefit_name": None,
+                        "provider_name": None
                     })
         
-        # 2. القسم الثاني: Breakdown by Benefit
+        # 2. Breakdown by Benefit
         elif current_section == "benefit":
             all_nums = [(idx, clean_number(t), t) for idx, t in enumerate(row_tokens) if re.search(r'\d', t)]
             
@@ -287,24 +298,26 @@ def parse_single_file(file_bytes, file_name, total_members):
                 real_nums = real_nums[-6:]
 
             benefit_rows.append({
+                "session_id": session_id,
                 "created_at": created_at_ts,
                 "policy_year": current_policy_year or "LAST POLICY YEAR",
                 "inception_date": current_inception or "",
                 "table_header": file_name,
-                "month_code": "Benefit Summary",
                 "class_tier": current_class_tier,
+                "section_type": "Breakdown by Benefit",
+                "month_code": "Benefit Summary",
                 "active_lives": 0,
                 "claims_count": int(real_nums[0]) if len(real_nums) > 0 else 0,
                 "paid_claims_sar": float(real_nums[1]) if len(real_nums) > 1 else 0.0,
                 "paid_claims_vat_sar": float(real_nums[2]) if len(real_nums) > 2 else 0.0,
                 "OS_claims_count": int(real_nums[3]) if len(real_nums) > 3 else 0,
-                "OS paid_claims_sar": float(real_nums[4]) if len(real_nums) > 4 else 0.0,
-                "OS paid_claims_vat_sar": float(real_nums[5]) if len(real_nums) > 5 else 0.0,
-                "section_type": "Breakdown by Benefit",
-                "benefit_name": benefit_label
+                "OS_paid_claims_sar": float(real_nums[4]) if len(real_nums) > 4 else 0.0,
+                "OS_paid_claims_vat_sar": float(real_nums[5]) if len(real_nums) > 5 else 0.0,
+                "benefit_name": benefit_label,
+                "provider_name": None
             })
         
-        # 3. القسم الثالث: Top 20 Providers
+        # 3. Top 20 Providers
         elif current_section == "providers":
             all_nums = [(idx, clean_number(t), t) for idx, t in enumerate(row_tokens) if re.search(r'\d', t)]
             
@@ -322,86 +335,71 @@ def parse_single_file(file_bytes, file_name, total_members):
             real_nums = [item[1] for item in metrics_nums]
 
             provider_rows.append({
+                "session_id": session_id,
                 "created_at": created_at_ts,
                 "policy_year": current_policy_year or "LAST POLICY YEAR",
                 "inception_date": current_inception or "",
                 "table_header": file_name,
                 "class_tier": current_class_tier,
+                "section_type": "Top 20 Providers",
+                "month_code": "Provider Summary",
+                "active_lives": 0,
                 "claims_count": int(real_nums[0]) if len(real_nums) > 0 else 0,
                 "paid_claims_sar": float(real_nums[1]) if len(real_nums) > 1 else 0.0,
                 "paid_claims_vat_sar": float(real_nums[2]) if len(real_nums) > 2 else 0.0,
                 "OS_claims_count": int(real_nums[3]) if len(real_nums) > 3 else 0,
-                "OS paid_claims_sar": float(real_nums[4]) if len(real_nums) > 4 else 0.0,
-                "OS paid_claims_vat_sar": float(real_nums[5]) if len(real_nums) > 5 else 0.0,
-                "section_type": "Top 20 Providers",
+                "OS_paid_claims_sar": float(real_nums[4]) if len(real_nums) > 4 else 0.0,
+                "OS_paid_claims_vat_sar": float(real_nums[5]) if len(real_nums) > 5 else 0.0,
+                "benefit_name": None,
                 "provider_name": prov_name
             })
 
     all_rows = monthly_rows + benefit_rows + provider_rows
     return pd.DataFrame(all_rows)
 
-# واجهة Streamlit ديناميكية بالكامل لدعم الملفات المتعددة
-st.title("مرصد المطالبات التأمينية | المعاينة والربط الذكي")
-st.markdown("استخراج الأقسام الثلاثة ديناميكياً وعمود تاريخ البداية (Inception Date) مع دعم رفع ملفات متعددة.")
-
-col_1, col_2 = st.columns(2)
-with col_1:
-    company_name = st.text_input("اسم الجهة أو الشركة المستفيدة", value="مؤسسة الأعمال المتقدمة")
-with col_2:
-    total_members = st.number_input("إجمالي عدد الموظفين المؤمن عليهم (Lives)", min_value=1, max_value=1000000, value=100, step=1)
-
-col_3, col_4 = st.columns(2)
-with col_3:
-    project_id_input = st.text_input("Google Cloud Project ID", value="claims-intelligence-507611")
-with col_4:
-    dataset_id_input = st.text_input("BigQuery Dataset ID", value="claims_intelligence")
-
-table_id_input = st.text_input("BigQuery Table ID", value="monthly_performance")
+# واجهة Streamlit الإنتاجية النظيفة
+st.title("مرصد المطالبات التأمينية الذكي")
+st.markdown("استخراج الأقسام الثلاثة تلقائياً وضخ البيانات الآمن إلى BigQuery مع تتبع الجلسات.")
 
 uploaded_files = st.file_uploader("رفع تقارير المطالبات المالية للشركة (PDF - متعدد)", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
-    tenant_id = f"tenant_{abs(hash(company_name))}"
+    session_id = str(uuid.uuid4())
     
-    if st.button("معالجة كافة الملفات المرفوعة واستخراج الجداول", type="primary"):
-        with st.spinner("جاري قراءة كافة الأقسام والتقاط تاريخ البداية (Inception Date)..."):
+    if st.button("معالجة الملفات وضخ البيانات إلى المستودع المركزي", type="primary"):
+        with st.spinner("جاري معالجة الملفات واستخراج البيانات بدقة الإنتاج..."):
             all_dfs = []
             for uploaded_file in uploaded_files:
                 file_bytes = uploaded_file.read()
-                df_single = parse_single_file(file_bytes, uploaded_file.name, total_members)
+                df_single = parse_single_file(file_bytes, uploaded_file.name, session_id)
                 if not df_single.empty:
                     all_dfs.append(df_single)
             
             if all_dfs:
                 df_actual = pd.concat(all_dfs, ignore_index=True)
-                st.session_state[f"real_dash_{tenant_id}"] = df_actual
-                st.success(f"تمت معالجة كافة الملفات بنجاح! إجمالي السجلات المستخرجة المدمجة: {len(df_actual)}")
+                st.session_state["prod_dash"] = df_actual
+                st.success(f"تمت معالجة كافة الملفات بنجاح! إجمالي السجلات المستخرجة: {len(df_actual)} | معرف الجلسة: {session_id}")
             else:
-                st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة، تأكد من صحة الـ PDF.")
+                st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة.")
 
-    active_key = f"real_dash_{tenant_id}"
-    if active_key in st.session_state and not st.session_state[active_key].empty:
-        df_res = st.session_state[active_key]
-        
-        df_monthly = df_res[df_res['section_type'] == 'Monthly Claims']
-        df_benefit = df_res[df_res['section_type'] == 'Breakdown by Benefit']
-        df_providers = df_res[df_res['section_type'] == 'Top 20 Providers']
+    if "prod_dash" in st.session_state and not st.session_state["prod_dash"].empty:
+        df_res = st.session_state["prod_dash"]
         
         st.markdown("---")
-        st.subheader("📋 معاينة البيانات المستخرجة لجميع الملفات للأقسام الثلاثة")
+        st.subheader("📋 معاينة البيانات المدمجة الجاهزة للضخ")
         
         tab1, tab2, tab3 = st.tabs([
-            "📅 1. Monthly Claims", 
-            "🏥 2. Breakdown by Benefit", 
-            "🏆 3. Top 20 Providers"
+            "📅 Monthly Claims", 
+            "🏥 Breakdown by Benefit", 
+            "🏆 Top 20 Providers"
         ])
         
         with tab1:
-            st.dataframe(df_monthly, use_container_width=True)
+            st.dataframe(df_res[df_res['section_type'] == 'Monthly Claims'], use_container_width=True)
         with tab2:
-            st.dataframe(df_benefit, use_container_width=True)
+            st.dataframe(df_res[df_res['section_type'] == 'Breakdown by Benefit'], use_container_width=True)
         with tab3:
-            st.dataframe(df_providers, use_container_width=True)
+            st.dataframe(df_res[df_res['section_type'] == 'Top 20 Providers'], use_container_width=True)
         
         st.markdown("---")
         col_dl, col_bq = st.columns(2)
@@ -409,22 +407,22 @@ if uploaded_files:
         with col_dl:
             csv_export = df_res.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="📥 تحميل التقرير المدمج الكامل بصيغة (CSV)",
+                label="📥 تحميل ملف (CSV)",
                 data=csv_export,
-                file_name=f"claims_export_all_{tenant_id}.csv",
+                file_name=f"claims_export_{session_id}.csv",
                 mime="text/css",
                 use_container_width=True
             )
             
         with col_bq:
-            if st.button("🚀 ضخ البيانات المدمجة إلى BigQuery مباشرة", type="secondary", use_container_width=True):
-                with st.spinner("جاري الإرسال الآمن إلى المستودع المركزي..."):
+            if st.button("🚀 تنفيذ الضخ المباشر إلى جدول BigQuery", type="secondary", use_container_width=True):
+                with st.spinner("جاري الإرسال الآمن إلى الجدول المركزي..."):
                     try:
-                        bq_client = get_bq_client(project_id_input)
-                        table_ref = f"{project_id_input}.{dataset_id_input}.{table_id_input}"
+                        bq_client = get_bq_client(PROJECT_ID)
+                        table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
                         errors = bq_client.insert_rows_json(table_ref, df_res.to_dict(orient="records"))
                         if errors == []:
-                            st.success("تم رفع كافة البيانات بنجاح إلى جدول BigQuery ومجهزة للربط بـ Looker Studio!")
+                            st.success("تم رفع كافة البيانات بنجاح إلى جدول `monthly_performance` وجاهزة للربط الفوري مع Looker Studio!")
                         else:
                             st.error(f"خطأ في الحفظ: {errors}")
                     except Exception as e:
