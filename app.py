@@ -1,6 +1,7 @@
 import os
 import io
 import uuid
+import json
 import urllib.parse
 import streamlit as st
 import pandas as pd
@@ -396,21 +397,10 @@ if uploaded_files:
                     if errors == []:
                         st.success(f"تم رفع كافة البيانات بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
                         
-                        # توليد رابط Looker Studio مع فلتر مباشر على حقل session_id لضمان ظهور البيانات فوراً
+                        # توليد رابط Looker Studio بالصيغة المباشرة للبارامتر
                         base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
-                        filter_payload = {
-                            "df5": {
-                                "include": [
-                                    {
-                                        "fieldId": "session_id",
-                                        "operator": "IN",
-                                        "values": [current_sess]
-                                    }
-                                ]
-                            }
-                        }
-                        encoded_params = urllib.parse.quote(json.dumps(filter_payload))
-                        looker_url = f"{base_url}?params={encoded_params}"
+                        params = {"ds14.p_client_session": current_sess}
+                        looker_url = f"{base_url}?{urllib.parse.urlencode(params)}"
                         
                         st.markdown("---")
                         st.markdown(f"### 📈 تقرير لوحة المؤشرات جاهز:")
