@@ -172,7 +172,8 @@ def parse_single_file(file_bytes, file_name, session_id):
                         "OS_claims_count": int(nums[4]) if len(nums) > 4 else 0,
                         "OS_paid_claims_sar": float(nums[5]) if len(nums) > 5 else 0.0,
                         "OS_paid_claims_vat_sar": float(nums[6]) if len(nums) > 6 else 0.0,
-                        "benefit_name": None, "provider_name": None
+                        "benefit_name": None, "provider_name": None,
+                        "contract_period": "12 Months", "contract_rank": "First"
                     })
         
         # 2. Breakdown by Benefit
@@ -234,31 +235,18 @@ def parse_single_file(file_bytes, file_name, session_id):
                 "contract_period": "12 Months", "contract_rank": "First"
             })
 
-    # حساب فترة العقد (12 أو 13 شهرًا) وتوزيع التصنيف التسلسلي (First, 2nd, 3rd...) لكل فئة وكل ملف
+    # تحديد فترة العقد والترتيب التسلسلي بدقة
     unique_months = [m for m in detected_months if m != 'Number of lives at start']
     contract_duration = "13 Months" if (len(unique_months) >= 2 and (unique_months[0] == unique_months[-1] or len(set(unique_months)) > 12)) else "12 Months"
-    
-    # تحديد طول فترة العقد الرقمية للترتيب التسلسلي
     period_length = 13 if contract_duration == "13 Months" else 12
 
-    # تجميع وإعطاء الترتيب التسلسلي لكل سجل شهري بناءً على الفئة والملف
-    for idx, rec in enumerate(temp_monthly_records):
+    for rec in temp_monthly_records:
         rec["contract_period"] = contract_duration
-        if rec["month_code"] == 'Number of lives at start':
-            rec["contract_rank"] = "First"
-        else:
-            # حساب الترتيب بناءً على موقع الشهر في التسلسل ضمن مجموعات بحجم period_length
-            # مثال: الشهر 1-12 First، 13-24 2nd، وهكذا
-            # سنقوم بترتيب المؤشر الزمني تصاعدياً لكل فئة وملف
-            pass
         monthly_rows.append(rec)
 
-    # معالجة contract_rank بدقة لكل فئة وملف على حدة بناءً على الترتيب الزمني الفعلي
     df_temp_m = pd.DataFrame(monthly_rows)
     if not df_temp_m.empty and 'month_code' in df_temp_m.columns:
-        # ترتيب السجلات حسب اسم الملف، الفئة، وشهر المطالبة
         df_temp_m = df_temp_m.sort_values(by=['table_header', 'class_tier', 'month_code'])
-        
         ranks_list = []
         rank_counter_map = {}
         
@@ -274,21 +262,15 @@ def parse_single_file(file_bytes, file_name, session_id):
             rank_counter_map[key] += 1
             curr_item_index = rank_counter_map[key]
             
-            # تحديد الترتيب التسلسلي (First للمجموعة الأولى، 2nd للثانية، 3rd للثالثة...)
             group_index = ((curr_item_index - 1) // period_length) + 1
-            if group_index == 1:
-                ranks_list.append("First")
-            elif group_index == 2:
-                ranks_list.append("2nd")
-            elif group_index == 3:
-                ranks_list.append("3rd")
-            else:
-                ranks_list.append(f"{group_index}th")
+            if group_index == 1: ranks_list.append("First")
+            elif group_index == 2: ranks_list.append("2nd")
+            elif group_index == 3: ranks_list.append("3rd")
+            else: ranks_list.append(f"{group_index}th")
                 
         df_temp_m['contract_rank'] = ranks_list
         monthly_rows = df_temp_m.to_dict(orient='records')
 
-    # تطبيق التنقية واستبعاد صفوف المطالبات الشهرية الصفرية مع الحفاظ على صفوف الأرصدة
     final_monthly = []
     for r in monthly_rows:
         if r['section_type'] == 'Monthly Claims':
@@ -298,3 +280,53 @@ def parse_single_file(file_bytes, file_name, session_id):
             final_monthly.append(r)
 
     return pd.DataFrame(final_monthly + benefit_rows + provider_rows)
+
+st.title("مرصد المطالبات التأمينية الذكي")
+st.markdown("رفع تقارير المطالبات ومعالجتها وضخها إلى BigQuery للربط مع Looker Studio.")
+
+uploaded_files = st.file_uploader("رفع تقارير المطالبات المالية للشركة (PDF - متعدد)", type=["pdf"], accept_multiple_files=True)
+
+if uploaded_files:
+    if "current_session_id" not in st.session_state:
+        st.session_state["current_session_id"] = f"sess_{str(uuid.uuid4())[:8]}"
+    
+    current_sess = st.session_state["current_session_id"]
+    st.info(f"🔑 معرف الجلسة الحالي: **{current_sess}**")
+    
+    if st.button("معالجة الملفات وضخ البيانات إلى BigQuery", type="primary"):
+        with st.spinner("جاري معالجة الملفات وضخها إلى المستودع المركزي..."):
+            all_dfs = []
+            for uploaded_file in uploaded_files:
+                file_bytes = uploaded_file.read()
+                df_single = parse_single_file(file_bytes, uploaded_file.name, current_sess)
+                if not df_single.empty: all_dfs.append(df_single)
+            
+            if all_dfs:
+                df_actual = pd.concat(all_dfs, ignore_index=True)
+                try:
+                    df_clean = df_actual.where(pd.notnull(df_actual), None)
+                    records_to_insert = df_clean.to_dict(orient="records")
+                    for r in records_to_insert:
+                        for k, v in r.items():
+                            if pd.isna(v): r[k] = None
+
+                    bq_client = get_bq_client(PROJECT_ID)
+                    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+                    errors = bq_client.insert_rows_json(table_ref, records_to_insert)
+                    
+                    if errors == []:
+                        st.success(f"تم رفع كافة البيانات بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
+                        
+                        base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
+                        params_data = {"ds14": {"p_client_session": current_sess}}
+                        looker_url = f"{base_url}/page/p_yr47xbgg7d?params={urllib.parse.quote(json.dumps(params_data))}"
+                        
+                        st.markdown("---")
+                        st.markdown(f"### 📈 تقرير لوحة المؤشرات جاهز:")
+                        st.markdown(f"[اضغط هنا لفتح لوحة البيانات في Looker Studio]({looker_url})", unsafe_allow_html=True)
+                    else:
+                        st.error(f"خطأ في الحفظ في BigQuery: {errors}")
+                except Exception as e:
+                    st.error(f"فشل الاتصال بقاعدة البيانات: {str(e)}")
+            else:
+                st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة.")
