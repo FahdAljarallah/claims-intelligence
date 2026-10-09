@@ -182,7 +182,8 @@ def parse_single_file(file_bytes, file_name, session_id):
             current_section = "providers"
             continue
 
-        if any(w in line_lower for w in ["annual claims", "monthly claim", "number of lives at start", "lives at start"]) or re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b', line_lower):
+        # دعم الكشف عن قسم الشهور سواء بالصيغة القياسية أو بصيغة YYYYMM (مثل 202107)
+        if any(w in line_lower for w in ["annual claims", "monthly claim", "number of lives at start", "lives at start"]) or re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})(0[1-9]|1[0-2])\b', line_lower):
             if not any(k in line_lower for k in ["top 20", "breakdown by benefit", "utilised providers"]):
                 current_section = "monthly"
 
@@ -214,13 +215,18 @@ def parse_single_file(file_bytes, file_name, session_id):
                 })
                 continue
 
-            date_match = re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\/\-\s]*(20\d{2})\b', line_lower)
+            # دعم استخراج التاريخ سواء كان YYYY-MM أو YYYYMM (مثل 202107)
+            date_match = re.search(r'\b(20\d{2})(0[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', line_lower)
             if date_match:
                 if date_match.group(1) and date_match.group(2):
-                    m_val, y_val = int(date_match.group(1)), int(date_match.group(2))
+                    # صيغة YYYYMM
+                    y_val, m_val = int(date_match.group(1)), int(date_match.group(2))
                     row_date = f"{y_val}-{str(m_val).zfill(2)}"
                 elif date_match.group(3) and date_match.group(4):
-                    y_val, m_val = int(date_match.group(3)), int(date_match.group(4))
+                    m_val, y_val = int(date_match.group(3)), int(date_match.group(4))
+                    row_date = f"{y_val}-{str(m_val).zfill(2)}"
+                elif date_match.group(5) and date_match.group(6):
+                    y_val, m_val = int(date_match.group(5)), int(date_match.group(6))
                     row_date = f"{y_val}-{str(m_val).zfill(2)}"
                 else:
                     row_date = row_text[:15].strip()
@@ -229,7 +235,7 @@ def parse_single_file(file_bytes, file_name, session_id):
                 for idx, t in enumerate(row_tokens):
                     if idx == 0 and t in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']:
                         continue
-                    if re.search(r'\b(0?[1-9]|1[0-2])[\/\-]20\d{2}\b|\b20\d{2}[\/\-](0?[1-9]|1[0-2])\b', t):
+                    if re.search(r'\b20\d{2}(0[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-]20\d{2}\b|\b20\d{2}[\/\-](0?[1-9]|1[0-2])\b', t):
                         continue
                     filtered_tokens.append(t)
                 
@@ -397,7 +403,6 @@ if uploaded_files:
                     if errors == []:
                         st.success(f"تم رفع كافة البيانات بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
                         
-                        # توليد رابط Looker Studio بهيكل JSON الصحيح والمدعوم لتمرير البارامترات
                         base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
                         params_data = {
                             "ds14": {
