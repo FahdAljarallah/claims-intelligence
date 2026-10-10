@@ -154,6 +154,7 @@ def parse_single_file(file_bytes, file_name, session_id):
                 current_inception = date_m.group(0)
             continue
             
+        # استخراج الفئة بدقة ومنع دمج النصوص الطويلة وصفحات المنافع
         if "class" in line_lower or "tier" in line_lower or "الفئة" in line_lower or "product" in line_lower:
             clean_class = re.sub(r'(class\s*type|class\s*tier|product\s*/\s*class|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
@@ -163,13 +164,10 @@ def parse_single_file(file_bytes, file_name, session_id):
             
             if clean_class and "confidential" not in clean_class.lower():
                 clean_class = re.sub(r'[.:\-]$', '', clean_class).strip()
-                if clean_class and len(clean_class) < 30:
+                # شرط قاطع لضمان أن الفئة اسم قصير ونقي وليس سطراً وصفياً أو عربياً طويلاً
+                if clean_class and len(clean_class) < 20 and not re.search(r'[\u0600-\u06FF]', clean_class):
                     current_class_tier = clean_class
             continue
-        elif current_class_tier and not any(k in line_lower for k in ["monthly claim", "breakdown", "top 20", "limit", "coinsurance"]) and len(row_text) > 5 and not re.search(r'\b(20\d{2})\b', row_text):
-            if any(w in line_lower for w in ["female", "male", "employee", "without", "divorced", "single"]):
-                current_class_tier = current_class_tier + " - " + row_text.strip().rstrip(' .')
-                continue
             
         if ("breakdown" in line_lower and "benefit" in line_lower) or any(k in line_lower for k in ["التوزيع حسب المنفعة"]):
             current_section = "benefit"
