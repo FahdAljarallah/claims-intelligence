@@ -260,13 +260,11 @@ st.markdown("رفع تقارير المطالبات المالية ومعالج�
 uploaded_files = st.file_uploader("رفع تقارير المطالبات المالية للشركة (PDF - متعدد)", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
-    if "current_session_id" not in st.session_state:
-        st.session_state["current_session_id"] = f"sess_{str(uuid.uuid4())[:8]}"
-    
-    current_sess = st.session_state["current_session_id"]
-    st.info(f"🔑 معرف الجلسة الحالي: **{current_sess}**")
-    
     if st.button("معالجة الملفات وضخ بيانات المطالبات الشهرية إلى BigQuery", type="primary"):
+        # توليد معرف جلسة جديد عند الضغط على زر المعالجة
+        current_sess = f"sess_{str(uuid.uuid4())[:8]}"
+        st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
+        
         with st.spinner("جاري معالجة الملفات وضخها إلى المستودع المركزي..."):
             all_dfs = []
             for uploaded_file in uploaded_files:
