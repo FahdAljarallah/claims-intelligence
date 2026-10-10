@@ -194,7 +194,11 @@ def parse_single_file(file_bytes, file_name, session_id):
         is_tawuniya_format = bool(row_tokens and re.match(r'^(0?[1-9]|1[0-2])[\/\-](20\d{2})$', row_tokens[0]))
 
         if date_match or is_tawuniya_format:
-            if date_match:
+            if is_tawuniya_format:
+                parts = row_tokens[0].replace('-', '/').split('/')
+                m_val, y_val = int(parts[0]), int(parts[1])
+                row_date = f"{y_val}-{str(m_val).zfill(2)}"
+            elif date_match:
                 if date_match.group(1) and date_match.group(2):
                     y_val, m_val = int(date_match.group(1)), int(date_match.group(2))
                     row_date = f"{y_val}-{str(m_val).zfill(2)}"
@@ -206,10 +210,6 @@ def parse_single_file(file_bytes, file_name, session_id):
                     row_date = f"{y_val}-{str(m_val).zfill(2)}"
                 else:
                     row_date = row_text[:15].strip()
-            elif is_tawuniya_format:
-                parts = row_tokens[0].replace('-', '/').split('/')
-                m_val, y_val = int(parts[0]), int(parts[1])
-                row_date = f"{y_val}-{str(m_val).zfill(2)}"
             else:
                 row_date = row_text[:15].strip()
             
@@ -261,7 +261,6 @@ uploaded_files = st.file_uploader("رفع تقارير المطالبات الم
 
 if uploaded_files:
     if st.button("معالجة الملفات وضخ بيانات المطالبات الشهرية إلى BigQuery", type="primary"):
-        # توليد معرف جلسة جديد عند الضغط على زر المعالجة
         current_sess = f"sess_{str(uuid.uuid4())[:8]}"
         st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
         
