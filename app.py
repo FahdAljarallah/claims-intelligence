@@ -132,6 +132,7 @@ def parse_single_file(file_bytes, file_name, session_id):
     current_policy_year = ""
     current_inception = ""
     current_class_tier = "CLASS VIP"
+    seen_months = set()
     
     for row in all_structured_rows:
         row_tokens = [w['text'] for w in row]
@@ -212,6 +213,11 @@ def parse_single_file(file_bytes, file_name, session_id):
                     row_date = row_text[:15].strip()
             else:
                 row_date = row_text[:15].strip()
+            
+            month_key = (file_name, current_class_tier, row_date)
+            if month_key in seen_months:
+                continue
+            seen_months.add(month_key)
             
             filtered_tokens = []
             for idx, t in enumerate(row_tokens):
