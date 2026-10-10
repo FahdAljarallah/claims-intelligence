@@ -151,7 +151,6 @@ def parse_single_file(file_bytes, file_name, session_id):
                 current_inception = date_m.group(0)
             continue
             
-        # استخراج الفئة بشكل نقي وآمن
         if "class" in line_lower or "tier" in line_lower or "الفئة" in line_lower or "product" in line_lower:
             clean_class = re.sub(r'(class\s*type|class\s*tier|product\s*/\s*class|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
@@ -167,7 +166,6 @@ def parse_single_file(file_bytes, file_name, session_id):
 
         created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
         
-        # البحث عن إجمالي الأرواح في بداية القسم الشهري
         if "number of lives at start" in line_lower or "lives at start" in line_lower:
             nums_lives = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
             lives_val = int(nums_lives[0]) if nums_lives else 100
@@ -192,119 +190,5 @@ def parse_single_file(file_bytes, file_name, session_id):
             })
             continue
 
-        # التقاط صفوف البيانات الشهرية (سواء صيغة YYYYMM أو YYYY-MM أو صيغة التعاونية MM/YYYY)
         date_match = re.search(r'\b(20\d{2})(0[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', line_lower)
-        is_tawuniya_format = bool(row_tokens and re.match(r'^(0?[1-9]|1[0-2])[\/\-](20\d{2})$', row_tokens[0]))
-
-        if date_match or is_tawuniya_format:
-            if date_match:
-                if date_match.group(1) and date_match.group(2):
-                    y_val, m_val = int(date_match.group(1)), int(date_match.group(2))
-                    row_date = f"{y_val}-{str(m_val).zfill(2)}"
-                elif date_match.group(3) and date_match.group(4):
-                    m_val, y_val = int(date_match.group(3)), int(date_match.group(4))
-                    row_date = f"{y_val}-{str(m_val).zfill(2)}"
-                elif date_match.group(5) and date_match.group(6):
-                    y_val, m_val = int(date_match.group(5)), int(date_match.group(6))
-                    row_date = f"{y_val}-{str(m_val).zfill(2)}"
-                else:
-                    row_date = row_text[:15].strip()
-            elif is_tawuniya_format:
-                parts = row_tokens[0].replace('-', '/').split('/')
-                m_val, y_val = int(parts[0]), int(parts[1])
-                row_date = f"{y_val}-{str(m_val).zfill(2)}"
-            else:
-                row_date = row_text[:15].strip()
-            
-            filtered_tokens = []
-            for idx, t in enumerate(row_tokens):
-                if idx == 0 and (t in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'] or '/' in t or '-' in t):
-                    continue
-                if re.search(r'\b20\d{2}(0[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-]20\d{2}\b|\b20\d{2}[\/\-](0?[1-9]|1[0-2])\b', t):
-                    continue
-                filtered_tokens.append(t)
-            
-            nums = [clean_number(t) for t in filtered_tokens if re.search(r'\d', t)]
-            
-            if nums:
-                active_lives_val = int(nums[0]) if len(nums) > 0 else 100
-                claims_cnt_val = int(nums[1]) if len(nums) > 1 else 0
-                p_sar = float(nums[2]) if len(nums) > 2 else 0.0
-                p_vat = float(nums[3]) if len(nums) > 3 else 0.0
-                os_cnt = int(nums[4]) if len(nums) > 4 else 0
-                os_sar = float(nums[5]) if len(nums) > 5 else 0.0
-                os_vat = float(nums[6]) if len(nums) > 6 else 0.0
-
-                monthly_rows.append({
-                    "session_id": session_id,
-                    "created_at": created_at_ts,
-                    "policy_year": current_policy_year or "LAST POLICY YEAR",
-                    "inception_date": current_inception or "",
-                    "table_header": file_name,
-                    "class_tier": current_class_tier,
-                    "section_type": "Monthly Claims",
-                    "month_code": row_date,
-                    "active_lives": active_lives_val,
-                    "claims_count": claims_cnt_val,
-                    "paid_claims_sar": p_sar,
-                    "paid_claims_vat_sar": p_vat,
-                    "OS_claims_count": os_cnt,
-                    "OS_paid_claims_sar": os_sar,
-                    "OS_paid_claims_vat_sar": os_vat,
-                    "benefit_name": None,
-                    "provider_name": None
-                })
-
-    return pd.DataFrame(monthly_rows)
-
-st.title("مرصد المطالبات التأمينية الذكي")
-st.markdown("رفع تقارير المطالبات المالية ومعالجتها وضخها إلى BigQuery (قسم المطالبات الشهرية فقط).")
-
-uploaded_files = st.file_uploader("رفع تقارير المطالبات المالية للشركة (PDF - متعدد)", type=["pdf"], accept_multiple_files=True)
-
-if uploaded_files:
-    if "current_session_id" not in st.session_state:
-        st.session_state["current_session_id"] = f"sess_{str(uuid.uuid4())[:8]}"
-    
-    current_sess = st.session_state["current_session_id"]
-    st.info(f"🔑 معرف الجلسة الحالي: **{current_sess}**")
-    
-    if st.button("معالجة الملفات وضخ بيانات المطالبات الشهرية إلى BigQuery", type="primary"):
-        with st.spinner("جاري معالجة الملفات وضخها إلى المستودع المركزي..."):
-            all_dfs = []
-            for uploaded_file in uploaded_files:
-                file_bytes = uploaded_file.read()
-                df_single = parse_single_file(file_bytes, uploaded_file.name, current_sess)
-                if not df_single.empty:
-                    all_dfs.append(df_single)
-            
-            if all_dfs:
-                df_actual = pd.concat(all_dfs, ignore_index=True)
-                
-                try:
-                    df_clean = df_actual.where(pd.notnull(df_actual), None)
-                    records_to_insert = df_clean.to_dict(orient="records")
-                    for r in records_to_insert:
-                        for k, v in r.items():
-                            if pd.isna(v):
-                                r[k] = None
-
-                    bq_client = get_bq_client(PROJECT_ID)
-                    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
-                    errors = bq_client.insert_rows_json(table_ref, records_to_insert)
-                    
-                    if errors == []:
-                        st.success(f"تم رفع بيانات المطالبات الشهرية بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
-                        
-                        base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
-                        params_data = {
-                            "ds14": {
-                                "p_client_session": current_sess
-                            }
-                        }
-                        encoded_params = urllib.parse.quote(json.dumps(params_data))
-                        looker_url = f"{base_url}/page/p_yr47xbgg7d?params={encoded_params}"
-                        
-                        st.markdown("---")
-                        st.markdown(f"### 📈 تقرير لوحة المؤشرات جاهز:")
-                        st.markdown(f"
+        is_tawuniya_format = bool(row_tokens and re.match(r'^(0?[1-9]|1
