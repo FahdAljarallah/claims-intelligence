@@ -144,7 +144,7 @@ def parse_single_file(file_bytes, file_name, session_id):
         if "confidential" in line_lower:
             continue
             
-        if "policy year" in line_lower or "last policy year" in line_lower or "سنة الوثيقة" in line_lower:
+        if "policy year" in line_lower or "last policy year" in line_lower or "سنة الوثيقة" in line_lower or "period" in line_lower:
             current_policy_year = row_text.strip()
             continue
             
@@ -179,7 +179,7 @@ def parse_single_file(file_bytes, file_name, session_id):
             current_section = "providers"
             continue
 
-        if any(w in line_lower for w in ["annual claims", "monthly claim", "number of lives at start", "lives at start"]) or re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})(0[1-9]|1[0-2])\b', line_lower):
+        if any(w in line_lower for w in ["annual claims", "monthly claim", "number of lives at start", "lives at start", "period"]) or re.search(r'\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})(0[1-9]|1[0-2])\b', line_lower):
             if not any(k in line_lower for k in ["top 20", "breakdown by benefit", "utilised providers"]):
                 current_section = "monthly"
 
@@ -211,22 +211,31 @@ def parse_single_file(file_bytes, file_name, session_id):
                 continue
 
             date_match = re.search(r'\b(20\d{2})(0[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', line_lower)
-            if date_match:
-                if date_match.group(1) and date_match.group(2):
-                    y_val, m_val = int(date_match.group(1)), int(date_match.group(2))
-                    row_date = f"{y_val}-{str(m_val).zfill(2)}"
-                elif date_match.group(3) and date_match.group(4):
-                    m_val, y_val = int(date_match.group(3)), int(date_match.group(4))
-                    row_date = f"{y_val}-{str(m_val).zfill(2)}"
-                elif date_match.group(5) and date_match.group(6):
-                    y_val, m_val = int(date_match.group(5)), int(date_match.group(6))
+            is_tawuniya_format = bool(row_tokens and re.match(r'^(0?[1-9]|1[0-2])[\/\-](20\d{2})$', row_tokens[0]))
+
+            if date_match or is_tawuniya_format:
+                if date_match:
+                    if date_match.group(1) and date_match.group(2):
+                        y_val, m_val = int(date_match.group(1)), int(date_match.group(2))
+                        row_date = f"{y_val}-{str(m_val).zfill(2)}"
+                    elif date_match.group(3) and date_match.group(4):
+                        m_val, y_val = int(date_match.group(3)), int(date_match.group(4))
+                        row_date = f"{y_val}-{str(m_val).zfill(2)}"
+                    elif date_match.group(5) and date_match.group(6):
+                        y_val, m_val = int(date_match.group(5)), int(date_match.group(6))
+                        row_date = f"{y_val}-{str(m_val).zfill(2)}"
+                    else:
+                        row_date = row_text[:15].strip()
+                elif is_tawuniya_format:
+                    parts = row_tokens[0].replace('-', '/').split('/')
+                    m_val, y_val = int(parts[0]), int(parts[1])
                     row_date = f"{y_val}-{str(m_val).zfill(2)}"
                 else:
                     row_date = row_text[:15].strip()
                 
                 filtered_tokens = []
                 for idx, t in enumerate(row_tokens):
-                    if idx == 0 and t in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']:
+                    if idx == 0 and (t in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'] or '/' in t or '-' in t):
                         continue
                     if re.search(r'\b20\d{2}(0[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-]20\d{2}\b|\b20\d{2}[\/\-](0?[1-9]|1[0-2])\b', t):
                         continue
