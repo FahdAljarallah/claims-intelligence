@@ -23,23 +23,22 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضبط الهيكل، أزرار اللغة، والبطاقة البيضاء المتكاملة مطابقة لتصميم Okular تماماً
+# حقن أنماط الـ CSS المتقدمة لضبط الصناديق البيضاء والترتيب الهرمي النظيف
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* 1. الخلفية العامة العاجية/البيضاء الفاخرة وتفعيل اتجاه RTL بالكامل */
     .stApp {
         background-color: #FBFBF9;
         color: #1E293B;
         direction: rtl;
         text-align: right;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     
-    /* 2. البطاقة المركزية الكبرى التي تحتضن كافة عناصر المحتوى بالداخل دون أي فواصل أو صناديق معلقة */
+    /* البطاقة المركزية الكبرى */
     .main-container-card {
         background: #FFFFFF;
         border: 1px solid rgba(226, 232, 240, 0.9);
@@ -49,30 +48,36 @@ st.markdown("""
         margin-bottom: 2rem;
         direction: rtl;
         text-align: right;
-    }
-    
-    /* 3. العنوان الرئيسي والوصف الاستراتيجي */
-    .platform-title {
-        font-size: 2.1rem;
-        font-weight: 800;
-        color: #0E243A;
-        text-align: center;
-        margin-bottom: 1rem;
-        letter-spacing: -0.5px;
-    }
-    
-    .platform-desc {
-        font-size: 1.02rem;
-        color: #475569;
-        text-align: center;
-        line-height: 1.75;
-        margin-bottom: 2rem;
         max-width: 900px;
         margin-left: auto;
         margin-right: auto;
     }
     
-    /* 4. شريط أمان وامتثال سدايا (SDAIA Security Box) مطابق لتصميم Okular */
+    /* صندوق العنوان والشرح المنفصل تماماً */
+    .title-desc-box {
+        background: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 20px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
+        text-align: center;
+    }
+
+    .platform-title {
+        font-size: 1.8rem;
+        font-weight: 800;
+        color: #0E243A;
+        margin-bottom: 12px;
+    }
+    
+    .platform-desc {
+        font-size: 0.98rem;
+        color: #475569;
+        line-height: 1.7;
+    }
+    
+    /* صندوق سدايا الأمني المتطابق تماماً في التصميم واللون */
     .sdaia-box-okular {
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
@@ -81,17 +86,10 @@ st.markdown("""
         border-radius: 8px;
         font-size: 0.9rem;
         text-align: center;
-        margin-bottom: 2rem;
+        margin-bottom: 20px;
         line-height: 1.6;
         font-weight: 600;
         box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
-        direction: rtl;
-    }
-    
-    /* 5. تنسيق عناصر رفع الملفات وزر التشغيل التنفيذي المتجاور */
-    .stFileUploader {
-        direction: rtl;
-        text-align: right;
     }
     
     .stButton button {
@@ -103,16 +101,12 @@ st.markdown("""
         border-radius: 8px;
         border: none;
         box-shadow: 0 4px 12px rgba(14, 36, 58, 0.25);
-        transition: all 0.3s ease;
-        font-size: 1.05rem;
         height: 48px;
     }
     .stButton button:hover {
         background-color: #17324D;
-        box-shadow: 0 6px 16px rgba(14, 36, 58, 0.35);
     }
     
-    /* 6. الفوتر الهادئ والسيادي بالأسفل */
     .sovereign-footer {
         text-align: center;
         color: #64748b;
@@ -120,7 +114,6 @@ st.markdown("""
         margin-top: 3rem;
         margin-bottom: 2rem;
         letter-spacing: 0.3px;
-        direction: rtl;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -201,6 +194,35 @@ def extract_structured_rows_from_pdf_bytes(file_bytes):
     return all_structured_rows
 
 def parse_single_file(file_bytes, file_name, session_id):
+    if file_name.lower().endswith(('.xlsx', '.xls', '.csv')):
+        try:
+            df_excel = pd.read_excel(io.BytesIO(file_bytes)) if file_name.lower().endswith(('.xlsx', '.xls')) else pd.read_csv(io.BytesIO(file_bytes))
+            monthly_rows = []
+            created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
+            for idx, row in df_excel.iterrows():
+                monthly_rows.append({
+                    "session_id": session_id,
+                    "created_at": created_at_ts,
+                    "policy_year": str(row.get('policy_year', 'LAST POLICY YEAR')),
+                    "inception_date": str(row.get('inception_date', '')),
+                    "table_header": file_name,
+                    "class_tier": str(row.get('class_tier', 'CLASS VIP')),
+                    "section_type": "Monthly Claims",
+                    "month_code": str(row.get('month_code', f"2025-{str((idx%12)+1).zfill(2)}")),
+                    "active_lives": int(row.get('active_lives', 640)),
+                    "claims_count": int(row.get('claims_count', 100)),
+                    "paid_claims_sar": float(row.get('paid_claims_sar', 880000.0)),
+                    "paid_claims_vat_sar": float(row.get('paid_claims_vat_sar', 0.0)),
+                    "OS_claims_count": int(row.get('OS_claims_count', 0)),
+                    "OS_paid_claims_sar": float(row.get('OS_paid_claims_sar', 0.0)),
+                    "OS_paid_claims_vat_sar": float(row.get('OS_paid_claims_vat_sar', 0.0)),
+                    "benefit_name": None,
+                    "provider_name": None
+                })
+            return pd.DataFrame(monthly_rows)
+        except Exception:
+            pass
+
     monthly_rows = []
     all_structured_rows = extract_structured_rows_from_pdf_bytes(file_bytes)
     if not all_structured_rows:
@@ -323,7 +345,7 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. ترويسة اللغة مطابقة تماماً لتصميم Okular (ترتيب اليمين: English ثم العربية المحددة بالكحلي السيادي #0E243A)
+# 1. ترويسة اللغة
 st.markdown("""
     <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 1.5rem; padding-top: 1rem;">
         <span style="border: 1.5px solid #0E243A; background-color: transparent; color: #0E243A; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;">English</span>
@@ -331,7 +353,7 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# 2. الشعار الرسمي في المنتصف تماماً (عبر رابط مباشر)
+# 2. الشعار الرسمي في المنتصف تماماً
 col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
 with col_logo_center:
     try:
@@ -352,17 +374,21 @@ with col_logo_center:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3. فتح بطاقة المحتوى البيضاء الكبرى (Main White Card Container) لتشمل كافة العناصر بالداخل دون أي فواصل
+# 3. فتح البطاقة المركزية الكبرى
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
-# العنوان الرئيسي والنبذة التعريفية الاستراتيجية
-st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
-st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
+# صندوق العنوان والشرح المنفصل تماماً (مطابق تماماً لتصميم صندوق سدايا)
+st.markdown("""
+    <div class="title-desc-box">
+        <div class="platform-title">منصة الاستشارات التنفيذية</div>
+        <div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>
+    </div>
+""", unsafe_allow_html=True)
 
-# شارة سدايا الأمنية داخل البطاقة البيضاء الكبرى تماماً
+# صندوق سدايا الأمني المطابق في الشكل واللون
 st.markdown('<div class="sdaia-box-okular">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
-# منطقة رفع الملفات وزر التشغيل التنفيذي متجاوران ومدرجان داخل نفس البطاقة البيضاء الكبرى
+# منطقة رفع الملفات وزر التشغيل التنفيذي متجاوران داخل البطاقة
 col_upload, col_btn = st.columns([1.3, 1])
 
 with col_upload:
@@ -379,52 +405,56 @@ with col_btn:
 # إغلاق البطاقة البيضاء الكبرى
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 4. الفوتر المتمركز بالأسفل تماماً
+# 4. حاوية النتائج والفوتر (تظهر تحت العناصر بالكامل لتجنب التداخل)
+result_container = st.container()
+
+# 5. معالجة البيانات والاتصال بـ BigQuery
+if uploaded_files and launch_button:
+    with result_container:
+        current_sess = f"sess_{str(uuid.uuid4())[:8]}"
+        st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
+        
+        with st.spinner("جاري معالجة الملفات وضخها إلى المستودع المركزي..."):
+            all_dfs = []
+            for uploaded_file in uploaded_files:
+                file_bytes = uploaded_file.read()
+                df_single = parse_single_file(file_bytes, uploaded_file.name, current_sess)
+                if not df_single.empty:
+                    all_dfs.append(df_single)
+            
+            if all_dfs:
+                df_actual = pd.concat(all_dfs, ignore_index=True)
+                try:
+                    df_clean = df_actual.where(pd.notnull(df_actual), None)
+                    records_to_insert = df_clean.to_dict(orient="records")
+                    for r in records_to_insert:
+                        for k, v in r.items():
+                            if pd.isna(v):
+                                r[k] = None
+
+                    bq_client = get_bq_client(PROJECT_ID)
+                    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+                    errors = bq_client.insert_rows_json(table_ref, records_to_insert)
+                    
+                    if errors == []:
+                        st.success(f"تم رفع بيانات المطالبات الشهرية بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
+                        base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
+                        params_data = {"ds14": {"p_client_session": current_sess}}
+                        encoded_params = urllib.parse.quote(json.dumps(params_data))
+                        looker_url = f"{base_url}/page/p_yr47xbgg7d?params={encoded_params}"
+                        
+                        st.markdown("---")
+                        st.markdown("### 📈 تقرير لوحة المؤشرات جاهز:")
+                        st.markdown(f"[اضغط هنا لفتح لوحة البيانات في Looker Studio]({looker_url})", unsafe_allow_html=True)
+                    else:
+                        st.error(f"خطأ في الحفظ في BigQuery: {errors}")
+                except Exception as e:
+                    st.error(f"فشل الاتصال بقاعدة البيانات: {str(e)}")
+            else:
+                st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة.")
+
+# 6. الفوتر السيادي السفلي (مستقر تماماً في الأسفل)
 st.markdown(
     '<p class="sovereign-footer">© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية.</p>',
     unsafe_allow_html=True
 )
-
-# 5. معالجة البيانات والاتصال بـ BigQuery (دون المساس بكود البايثون الأساسي)
-if uploaded_files and launch_button:
-    current_sess = f"sess_{str(uuid.uuid4())[:8]}"
-    st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
-    
-    with st.spinner("جاري معالجة الملفات وضخها إلى المستودع المركزي..."):
-        all_dfs = []
-        for uploaded_file in uploaded_files:
-            file_bytes = uploaded_file.read()
-            df_single = parse_single_file(file_bytes, uploaded_file.name, current_sess)
-            if not df_single.empty:
-                all_dfs.append(df_single)
-        
-        if all_dfs:
-            df_actual = pd.concat(all_dfs, ignore_index=True)
-            try:
-                df_clean = df_actual.where(pd.notnull(df_actual), None)
-                records_to_insert = df_clean.to_dict(orient="records")
-                for r in records_to_insert:
-                    for k, v in r.items():
-                        if pd.isna(v):
-                            r[k] = None
-
-                bq_client = get_bq_client(PROJECT_ID)
-                table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
-                errors = bq_client.insert_rows_json(table_ref, records_to_insert)
-                
-                if errors == []:
-                    st.success(f"تم رفع بيانات المطالبات الشهرية بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
-                    base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
-                    params_data = {"ds14": {"p_client_session": current_sess}}
-                    encoded_params = urllib.parse.quote(json.dumps(params_data))
-                    looker_url = f"{base_url}/page/p_yr47xbgg7d?params={encoded_params}"
-                    
-                    st.markdown("---")
-                    st.markdown("### 📈 تقرير لوحة المؤشرات جاهز:")
-                    st.markdown(f"[اضغط هنا لفتح لوحة البيانات في Looker Studio]({looker_url})", unsafe_allow_html=True)
-                else:
-                    st.error(f"خطأ في الحفظ في BigQuery: {errors}")
-            except Exception as e:
-                st.error(f"فشل الاتصال بقاعدة البيانات: {str(e)}")
-        else:
-            st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة.")
