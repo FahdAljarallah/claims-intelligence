@@ -26,11 +26,18 @@ st.set_page_config(
 if 'lang' not in st.session_state:
     st.session_state.lang = 'ar'
 
+# التعامل مع الضغط على أزرار اللغة عبر Query Parameters لتجاوز قيود أزرار ستريمليت
+query_params = st.query_params
+if "lang" in query_params:
+    lang_val = query_params["lang"]
+    if lang_val in ['ar', 'en']:
+        st.session_state.lang = lang_val
+
 is_ar = st.session_state.lang == 'ar'
 text_align = "right" if is_ar else "left"
 direction = "rtl" if is_ar else "ltr"
 
-# حقن أنماط الـ CSS المتقدمة مع استهداف دقيق لوسوم النصوص داخل الأزرار
+# حقن أنماط الـ CSS النظيفة والاحترافية
 st.markdown(f"""
     <style>
     #MainMenu {{visibility: hidden;}}
@@ -69,6 +76,40 @@ st.markdown(f"""
         background-color: #17324D;
     }}
     
+    /* تصميم أزرار اللغة بـ HTML النقي لضمان ظهور النصوص والألوان بدقة متناهية */
+    .lang-bar-container {{
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 8px;
+        max-width: 900px;
+        margin: 1.5rem auto 0.5rem auto;
+        padding: 0 10px;
+    }}
+    .lang-pill {{
+        padding: 6px 16px;
+        border-radius: 6px;
+        font-size: 0.88rem;
+        font-weight: 600;
+        text-decoration: none;
+        transition: all 0.2s ease;
+        display: inline-block;
+        text-align: center;
+    }}
+    .lang-pill-active {{
+        background-color: #0E243A;
+        color: #FFFFFF;
+        border: 1.5px solid #0E243A;
+    }}
+    .lang-pill-inactive {{
+        background-color: #FFFFFF;
+        color: #0E243A;
+        border: 1.5px solid #0E243A;
+    }}
+    .lang-pill-inactive:hover {{
+        background-color: #F1F5F9;
+    }}
+
     .main-container-card {{
         background: #FFFFFF;
         border: 1px solid rgba(226, 232, 240, 0.9);
@@ -160,60 +201,16 @@ translations = {
 
 t = translations[st.session_state.lang]
 
-# أزرار اللغة المتجاوران في أعلى الصفحة بتنسيق دقيق ومضبوط
-col_space, col_en, col_ar = st.columns([10, 0.9, 0.9])
+# أزرار اللغة النقية بـ HTML مطابقة تماماً للتصميم الأصلي (العربية والإنجليزية متجاوران)
+en_class = "lang-pill lang-pill-active" if not is_ar else "lang-pill lang-pill-inactive"
+ar_class = "lang-pill lang-pill-active" if is_ar else "lang-pill lang-pill-inactive"
 
-with col_en:
-    is_en_active = (st.session_state.lang == 'en')
-    en_bg = "#0E243A" if is_en_active else "#FFFFFF"
-    en_color = "#FFFFFF" if is_en_active else "#0E243A"
-    st.markdown(f"""
-        <style>
-        div[data-testid="column"]:nth-of-type(2) button {{
-            background-color: {en_bg} !important;
-            color: {en_color} !important;
-            border: 1.5px solid #0E243A !important;
-            font-weight: 600 !important;
-            border-radius: 6px !important;
-            height: 36px !important;
-            font-size: 0.85rem !important;
-            box-shadow: none !important;
-        }}
-        div[data-testid="column"]:nth-of-type(2) button p, 
-        div[data-testid="column"]:nth-of-type(2) button span {{
-            color: {en_color} !important;
-        }}
-        </style>
-    """, unsafe_allow_html=True)
-    if st.button("English", key="lang_en_pill"):
-        st.session_state.lang = 'en'
-        st.rerun()
-
-with col_ar:
-    is_ar_active = (st.session_state.lang == 'ar')
-    ar_bg = "#0E243A" if is_ar_active else "#FFFFFF"
-    ar_color = "#FFFFFF" if is_ar_active else "#0E243A"
-    st.markdown(f"""
-        <style>
-        div[data-testid="column"]:nth-of-type(3) button {{
-            background-color: {ar_bg} !important;
-            color: {ar_color} !important;
-            border: 1.5px solid #0E243A !important;
-            font-weight: 600 !important;
-            border-radius: 6px !important;
-            height: 36px !important;
-            font-size: 0.85rem !important;
-            box-shadow: none !important;
-        }}
-        div[data-testid="column"]:nth-of-type(3) button p, 
-        div[data-testid="column"]:nth-of-type(3) button span {{
-            color: {ar_color} !important;
-        }}
-        </style>
-    """, unsafe_allow_html=True)
-    if st.button("العربية", key="lang_ar_pill"):
-        st.session_state.lang = 'ar'
-        st.rerun()
+st.markdown(f"""
+    <div class="lang-bar-container">
+        <a href="?lang=en" class="{en_class}">English</a>
+        <a href="?lang=ar" class="{ar_class}">العربية</a>
+    </div>
+""", unsafe_allow_html=True)
 
 PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
