@@ -180,7 +180,7 @@ translations = {
         'launch': "تشغيل اللوحة التنفيذية",
         'processing': "جاري معالجة الملفات وضخها إلى المستودع المركزي...",
         'ready': "📈 تقرير لوحة المؤشرات جاهز:",
-        'link': "اضغط هنا لفتح لوحة البيانات في Looker Studio",
+        'link': "اضغط هنا لفتح لوحة البيانات في نفس الصفحة",
         'footer': "© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية."
     },
     'en': {
@@ -191,7 +191,7 @@ translations = {
         'launch': "Launch Executive Dashboard",
         'processing': "Processing files and loading to the central data warehouse...",
         'ready': "📈 Executive Dashboard Report Ready:",
-        'link': "Click here to open the dashboard in Looker Studio",
+        'link': "Click here to open the dashboard on the same page",
         'footer': "© 2026 Fahd Aljarallah - All rights reserved for the Sovereign Workspace."
     }
 }
@@ -203,8 +203,8 @@ ar_class = "lang-pill lang-pill-active" if is_ar else "lang-pill lang-pill-inact
 
 st.markdown(f"""
     <div class="lang-bar-container">
-        <a href="?lang=en" class="{en_class}">English</a>
-        <a href="?lang=ar" class="{ar_class}">العربية</a>
+        <a href="?lang=en" target="_self" class="{en_class}">English</a>
+        <a href="?lang=ar" target="_self" class="{ar_class}">العربية</a>
     </div>
 """, unsafe_allow_html=True)
 
@@ -278,8 +278,8 @@ def parse_single_file(file_bytes, file_name, session_id):
                     "paid_claims_sar": float(row.get('paid_claims_sar', 880000.0)),
                     "paid_claims_vat_sar": float(row.get('paid_claims_vat_sar', 0.0)),
                     "OS_claims_count": 0,
-                    "OS_paid_claims_sar": 0.0,
-                    "OS_paid_claims_vat_sar": 0.0,
+                    "OS_paid_claims_sar": float(row.get('OS_paid_claims_sar', 0.0)),
+                    "OS_paid_claims_vat_sar": float(row.get('OS_paid_claims_vat_sar', 0.0)),
                     "benefit_name": None,
                     "provider_name": None
                 })
@@ -363,7 +363,7 @@ if uploaded_files and launch_button:
                         encoded_params = urllib.parse.quote(json.dumps(params_data))
                         looker_url = f"{base_url}/page/p_yr47xbgg7d?params={encoded_params}"
                         
-                        # تم تغيير target="_blank" إلى target="_self" ليفتح الرابط على نفس الصفحة
+                        # إجبار الرابط على الفتح في نفس الصفحة عبر target="_self" في HTML نقي
                         st.markdown(f"""
                             <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 24px; margin-top: 20px; text-align: {text_align}; direction: {direction}; box-shadow: 0 1px 4px rgba(0,0,0,0.02); max-width: 900px; margin-left: auto; margin-right: auto;">
                                 <h3 style="color: #0E243A; font-size: 1.2rem; font-weight: 700; margin-bottom: 12px;">{t['ready']}</h3>
