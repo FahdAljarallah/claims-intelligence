@@ -181,7 +181,7 @@ translations = {
         'launch': "تشغيل اللوحة التنفيذية",
         'processing': "جاري معالجة الملفات وضخها إلى المستودع المركزي...",
         'ready': "📈 تقرير لوحة المؤشرات جاهز:",
-        'link': "اضغط هنا لفتح لوحة البيانات في نفس الصفحة",
+        'link': "اضغط هنا لفتح لوحة البيانات التنفيذية",
         'footer': "© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية."
     },
     'en': {
@@ -192,7 +192,7 @@ translations = {
         'launch': "Launch Executive Dashboard",
         'processing': "Processing files and loading to the central data warehouse...",
         'ready': "📈 Executive Dashboard Report Ready:",
-        'link': "Click here to open the dashboard on the same page",
+        'link': "Click here to open the executive dashboard",
         'footer': "© 2026 Fahd Aljarallah - All rights reserved for the Sovereign Workspace."
     }
 }
@@ -488,6 +488,9 @@ if uploaded_files and launch_button:
     with result_container:
         current_sess = f"sess_{str(uuid.uuid4())[:8]}"
         
+        # عرض رقم الجلسة بوضوح للمستخدم قبل معالجة البيانات
+        st.info(f"🔑 معرف الجلسة السيادية النشطة: **{current_sess}**")
+        
         with st.spinner(t['processing']):
             all_dfs = []
             for uploaded_file in uploaded_files:
@@ -506,7 +509,7 @@ if uploaded_files and launch_button:
                     errors = bq_client.insert_rows_json(table_ref, records_to_insert)
                     
                     if errors == []:
-                        # استخدام النطاق المحدث لـ Looker Studio والفتح على نفس الصفحة
+                        # استخدام الرابط الحديث Looker Studio مع فتح في تبويب مستقل لتجنب حظر الأمان (X-Frame)
                         base_url = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
                         params_data = {"ds14": {"p_client_session": current_sess}}
                         encoded_params = urllib.parse.quote(json.dumps(params_data))
@@ -515,7 +518,7 @@ if uploaded_files and launch_button:
                         st.markdown(f"""
                             <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 24px; margin-top: 20px; text-align: {text_align}; direction: {direction}; box-shadow: 0 1px 4px rgba(0,0,0,0.02); max-width: 900px; margin-left: auto; margin-right: auto;">
                                 <h3 style="color: #0E243A; font-size: 1.2rem; font-weight: 700; margin-bottom: 12px;">{t['ready']}</h3>
-                                <p style="margin-bottom: 0;"><a href="{looker_url}" target="_self" style="color: #0E243A; font-weight: 700; text-decoration: underline;">{t['link']}</a></p>
+                                <p style="margin-bottom: 0;"><a href="{looker_url}" target="_blank" style="color: #0E243A; font-weight: 700; text-decoration: underline;">{t['link']}</a></p>
                             </div>
                         """, unsafe_allow_html=True)
                     else:
