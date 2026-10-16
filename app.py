@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS لإجبار التصميم السينمائي النظيف
+# حقن أنماط الـ CSS السينمائية الصارمة
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -38,6 +38,16 @@ st.markdown("""
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     
+    /* الهيدر العلوي المنظم */
+    .top-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        max-width: 900px;
+        margin: 1.5rem auto 1rem auto;
+        padding: 0 1rem;
+    }
+
     /* البطاقة المركزية البيضاء الكبرى */
     .main-container-card {
         background: #FFFFFF;
@@ -46,7 +56,7 @@ st.markdown("""
         padding: 40px 50px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
         max-width: 900px;
-        margin: 2rem auto;
+        margin: 0 auto;
         direction: rtl;
         text-align: right;
     }
@@ -79,7 +89,7 @@ st.markdown("""
         font-weight: 600;
     }
 
-    /* تنسيق زر التشغيل ليتطابق تماماً مع التصميم */
+    /* تنسيق زر التشغيل ليكون احترافياً وداكناً */
     .stButton button {
         width: 100%;
         background-color: #0E243A !important;
@@ -148,22 +158,18 @@ def parse_single_file(file_bytes, file_name, session_id):
             pass
     return pd.DataFrame()
 
-# 1. الهيدر العلوي المنظم بدقة (أزرار اللغة يسار، الشعار يمين)
-col_h1, col_h2 = st.columns([1, 1])
-with col_h1:
-    st.markdown("""
-        <div style="display: flex; gap: 8px; align-items: center; padding-top: 10px;">
-            <span style="border: 1px solid #0E243A; color: #0E243A; padding: 4px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; background: transparent;">English</span>
+# 1. هيدر علوي نظيف بالكامل بداخل كود HTML موحد لضمان عدم تفكك الأزرار
+st.markdown("""
+    <div style="display: flex; justify-content: space-between; align-items: center; max-width: 900px; margin: 0 auto 1.5rem auto; padding: 0 10px;">
+        <div style="display: flex; gap: 6px;">
+            <span style="border: 1px solid #0E243A; color: #0E243A; padding: 4px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: 600;">English</span>
             <span style="background-color: #0E243A; color: #FFFFFF; padding: 4px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: 600;">العربية</span>
         </div>
-    """, unsafe_allow_html=True)
-
-with col_h2:
-    st.markdown("""
-        <div style="text-align: left; color: #0E243A; font-weight: 800; font-size: 1.1rem; padding-top: 10px;">
+        <div style="color: #0E243A; font-weight: 800; font-size: 1.1rem;">
             فهد الجارالله <span style="font-size: 0.7rem; color: #64748B;">FAHD ALJARALLAH</span>
         </div>
-    """, unsafe_allow_html=True)
+    </div>
+""", unsafe_allow_html=True)
 
 # 2. فتح البطاقة المركزية الكبرى
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
@@ -173,7 +179,7 @@ st.markdown('<div class="platform-desc">أداة تحليل استراتيجية
 
 st.markdown('<div class="sdaia-box">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
-# حقل الرفع وزر التشغيل مرتبة بداخل الكرت
+# عناصر رفع الملفات وزر التشغيل داخل الكرت
 uploaded_files = st.file_uploader(
     "اسحب ملفات البيانات هنا أو اضغط للاختيار (PDF / CSV / XLSX)",
     type=["pdf", "csv", "xlsx", "xls"],
