@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضبط الهيكل وإزالة الفراغات الوهمية
+# حقن أنماط الـ CSS المتقدمة لضبط الهيكل بدقة مطلقة وإزالة أي صناديق فارغة
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -353,29 +353,15 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# 2. الشعار الرسمي في المنتصف تماماً (تم إزالة الصندوق الخارجي الزائد)
-col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
-with col_logo_center:
-    try:
-        logo_url = "https://lh3.googleusercontent.com/d/11LDGzgTrWg18ubhLZ1p5ocf6DTL80e1W=w1000?authuser=0"
-        response = requests.get(logo_url, timeout=5)
-        if response.status_code == 200:
-            logo_img = Image.open(io.BytesIO(response.content))
-            st.image(logo_img, use_container_width=True)
-        else:
-            logo_img = Image.open("Full Logo - 600-400 _4.png")
-            st.image(logo_img, use_container_width=True)
-    except Exception:
-        st.markdown("""
-            <div style="width: 100%; height: 80px; display: flex; justify-content: center; align-items: center; color: #0E243A; font-weight: 800; font-size: 1.3rem;">
-                فهد الجارالله
-            </div>
-        """, unsafe_allow_html=True)
+# 2. الشعار الرسمي عبر HTML نقي ومباشر (بدون أعمدة أو حاويات تلقائية تولد صناديق فارغة)
+logo_url = "https://lh3.googleusercontent.com/d/11LDGzgTrWg18ubhLZ1p5ocf6DTL80e1W=w1000?authuser=0"
+st.markdown(f"""
+    <div style="text-align: center; margin-bottom: 2rem;">
+        <img src="{logo_url}" style="max-width: 240px; height: auto;" alt="Fahd Aljarallah Logo">
+    </div>
+""", unsafe_allow_html=True)
 
-# تباسيط وفراغات نظيفة ومدروسة بدقة
-st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-
-# 3. فتح البطاقة المركزية الكبرى
+# 3. فتح البطاقة المركزية الكبرى مباشرة
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
 # صندوق العنوان والشرح المنفصل
