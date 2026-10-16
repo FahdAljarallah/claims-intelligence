@@ -16,111 +16,82 @@ import requests
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
+# إعدادات الصفحة لتكون بعرض نظيف ومناسب (Wide Mode) مع الحفاظ على التمركز السيادي
 st.set_page_config(
-    page_title="منصة الاستشارات التنفيذية | Executive Advisory Platform",
-    page_icon="📊",
-    layout="centered",
+    page_title="منصة الاستشارات التنفيذية | Claims Intelligence",
+    page_layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضبط الهيكل، أزرار اللغة، والبطاقة البيضاء المتكاملة مطابقة لتصميم Okular تماماً
+# تخصيص الـ CSS لإلغاء العناصر الافتراضية وضبط تصميم الـ Light Mode السيادي بالكامل وتفعيل اتجاه RTL
 st.markdown("""
     <style>
+    /* خلفية الصفحة العامة لون فانيلا/بيج فاتح ونظيف */
+    .stApp {
+        background-color: #F4F5F7;
+        direction: rtl;
+        text-align: right;
+    }
+    
+    /* إخفاء القائمة العلوية وفوتر ستريمليت الافتراضي */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
-    
-    /* 1. الخلفية العامة العاجية/البيضاء الفاخرة وتفعيل اتجاه RTL بالكامل */
-    .stApp {
-        background-color: #FBFBF9;
-        color: #1E293B;
-        direction: rtl;
-        text-align: right;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    }
-    
-    /* 2. البطاقة المركزية الكبرى التي تحتضن كافة عناصر المحتوى بالداخل دون أي فواصل أو صناديق معلقة */
-    .main-container-card {
-        background: #FFFFFF;
-        border: 1px solid rgba(226, 232, 240, 0.9);
+
+    /* تنسيق الكرت الأبيض المركزي السينمائي */
+    .main-card {
+        background-color: #FFFFFF;
+        padding: 40px 50px;
         border-radius: 16px;
-        padding: 40px;
-        box-shadow: 0 12px 35px rgba(14, 36, 58, 0.05);
-        margin-bottom: 2rem;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+        max-width: 900px;
+        margin: 0 auto;
         direction: rtl;
         text-align: right;
     }
-    
-    /* 3. العنوان الرئيسي والوصف الاستراتيجي */
-    .platform-title {
-        font-size: 2.1rem;
+
+    /* تنسيق العناوين والنصوص */
+    .hero-title {
+        color: #0F172A;
         font-weight: 800;
-        color: #0E243A;
+        font-size: 28px;
         text-align: center;
-        margin-bottom: 1rem;
-        letter-spacing: -0.5px;
+        margin-bottom: 12px;
     }
-    
-    .platform-desc {
-        font-size: 1.02rem;
+    .hero-subtitle {
         color: #475569;
+        font-size: 15px;
         text-align: center;
-        line-height: 1.75;
-        margin-bottom: 2rem;
-        max-width: 900px;
-        margin-left: auto;
-        margin-right: auto;
-    }
-    
-    /* 4. شريط أمان وامتثال سدايا (SDAIA Security Box) مطابق لتصميم Okular */
-    .sdaia-box-okular {
-        background: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        color: #065F46;
-        padding: 14px 18px;
-        border-radius: 8px;
-        font-size: 0.9rem;
-        text-align: center;
-        margin-bottom: 2rem;
         line-height: 1.6;
-        font-weight: 600;
-        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
+        margin-bottom: 24px;
+    }
+
+    /* صندوق الامتثال السيادي */
+    .security-badge {
+        background-color: #F8FAFC;
+        border: 1px solid #E2E8F0;
+        padding: 14px 20px;
+        border-radius: 8px;
+        text-align: center;
+        color: #1E293B;
+        font-size: 13px;
+        margin-bottom: 24px;
+        direction: rtl;
+    }
+
+    /* تنسيق الفوتر السفلي الثابت */
+    .footer-text {
+        text-align: center;
+        color: #64748B;
+        font-size: 12px;
+        margin-top: 40px;
         direction: rtl;
     }
     
-    /* 5. تنسيق عناصر رفع الملفات وزر التشغيل التنفيذي المتجاور */
+    /* تنسيق عناصر الرفع والزر لتتناسب مع محاذاة RTL */
     .stFileUploader {
         direction: rtl;
         text-align: right;
-    }
-    
-    .stButton button {
-        width: 100%;
-        background-color: #0E243A;
-        color: #FFFFFF;
-        font-weight: 700;
-        padding: 0.85rem 1.5rem;
-        border-radius: 8px;
-        border: none;
-        box-shadow: 0 4px 12px rgba(14, 36, 58, 0.25);
-        transition: all 0.3s ease;
-        font-size: 1.05rem;
-        height: 48px;
-    }
-    .stButton button:hover {
-        background-color: #17324D;
-        box-shadow: 0 6px 16px rgba(14, 36, 58, 0.35);
-    }
-    
-    /* 6. الفوتر الهادئ والسيادي بالأسفل */
-    .sovereign-footer {
-        text-align: center;
-        color: #64748b;
-        font-size: 0.85rem;
-        margin-top: 3rem;
-        margin-bottom: 2rem;
-        letter-spacing: 0.3px;
-        direction: rtl;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -323,17 +294,20 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. ترويسة اللغة مطابقة تماماً لتصميم Okular (ترتيب اليمين: English ثم العربية المحددة بالكحلي السيادي #0E243A)
-st.markdown("""
-    <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 1.5rem; padding-top: 1rem;">
-        <span style="border: 1.5px solid #0E243A; background-color: transparent; color: #0E243A; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;">English</span>
-        <span style="border: 1.5px solid #0E243A; background-color: #0E243A; color: #FFFFFF; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;">العربية</span>
-    </div>
-""", unsafe_allow_html=True)
+# 1. الهيدر العلوي (أزرار تبديل اللغات في أقصى اليمين بالتسلسل الصحيح مطابقة تماماً لـ Okular)
+header_col1, header_col2, header_col3 = st.columns([6, 2, 2])
+with header_col3:
+    lang_col1, lang_col2 = st.columns(2)
+    with lang_col1:
+        st.button("English", key="lang_en")
+    with lang_col2:
+        st.button("العربية", key="lang_ar")
+
+st.markdown("<br>", unsafe_allow_html=True)
 
 # 2. الشعار الرسمي في المنتصف تماماً (عبر رابط مباشر)
-col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
-with col_logo_center:
+logo_col1, logo_col2, logo_col3 = st.columns([1, 2, 1])
+with logo_col2:
     try:
         logo_url = "https://lh3.googleusercontent.com/d/11LDGzgTrWg18ubhLZ1p5ocf6DTL80e1W=w1000?authuser=0"
         response = requests.get(logo_url)
@@ -346,47 +320,39 @@ with col_logo_center:
     except Exception:
         st.markdown("""
             <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center; color: #0E243A; font-weight: 700;">
-                FAHD ALJARALLAH LOGO
+                فهد الجارالله
             </div>
         """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3. فتح بطاقة المحتوى البيضاء الكبرى (Main White Card Container) لتشمل كافة العناصر بالداخل دون أي فواصل
-st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
+# 3. البطاقة المركزية البيضاء (Main Container Card الاحتوائية بالكامل)
+st.markdown('<div class="main-card">', unsafe_allow_html=True)
 
-# العنوان الرئيسي والنبذة التعريفية الاستراتيجية
-st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
-st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
+# العنوان الرئيسي والوصف الاستراتيجي
+st.markdown('<div class="hero-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero-subtitle">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
 
-# شارة سدايا الأمنية داخل البطاقة البيضاء الكبرى تماماً
-st.markdown('<div class="sdaia-box-okular">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
+# شريط الامتثال السيادي الثابت
+st.markdown('<div class="security-badge">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
-# منطقة رفع الملفات وزر التشغيل التنفيذي متجاوران ومدرجان داخل نفس البطاقة البيضاء الكبرى
-col_upload, col_btn = st.columns([1.3, 1])
+# منطقة رفع الملفات وزر التشغيل جنباً إلى جنب داخل نفس البطاقة المركزية
+col_upload, col_btn = st.columns([6, 4], gap="medium")
 
 with col_upload:
-    uploaded_files = st.file_uploader(
-        "اسحب ملفات البيانات هنا أو اضغط للاختيار (CSV / XLSX)",
-        type=["pdf", "csv", "xlsx"],
-        accept_multiple_files=True
-    )
+    uploaded_files = st.file_uploader("اسحب ملفات البيانات هنا أو اضغط للاختيار (CSV / XLSX / PDF)", type=["pdf", "csv", "xlsx"], accept_multiple_files=True)
 
 with col_btn:
-    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    launch_button = st.button("تشغيل اللوحة التنفيذية", type="primary")
+    st.markdown("<br>", unsafe_allow_html=True)
+    launch_btn = st.button("تشغيل اللوحة التنفيذية", use_container_width=True, type="primary")
 
-# إغلاق البطاقة البيضاء الكبرى
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 4. الفوتر المتمركز بالأسفل تماماً
-st.markdown(
-    '<p class="sovereign-footer">© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية.</p>',
-    unsafe_allow_html=True
-)
+# 4. الفوتر السيادي السفلي
+st.markdown('<div class="footer-text">© 2026 فهد الجار الله - جميع حقوق محفوظة لبيئة العمل السيادية</div>', unsafe_allow_html=True)
 
 # 5. معالجة البيانات والاتصال بـ BigQuery (دون المساس بكود البايثون الأساسي)
-if uploaded_files and launch_button:
+if uploaded_files and launch_btn:
     current_sess = f"sess_{str(uuid.uuid4())[:8]}"
     st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
     
