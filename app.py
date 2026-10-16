@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة وضبط محاذاة الصناديق والنتائج باليمين
+# حقن أنماط الـ CSS المتقدمة مع توحيد لون درع سدايا ليطابق الكحلي السيادي تماماً
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -86,11 +86,11 @@ st.markdown("""
         line-height: 1.7;
     }
     
-    /* صندوق سدايا الأمني المطابق تماماً في الشكل واللون */
+    /* صندوق سدايا الأمني (محدث باللون الكحلي السيادي بدلاً من الأخضر) */
     .sdaia-box-okular {
-        background: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        color: #065F46;
+        background: #F8FAFC;
+        border: 1px solid #CBD5E1;
+        color: #0E243A;
         padding: 14px 18px;
         border-radius: 8px;
         font-size: 0.9rem;
@@ -394,7 +394,7 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# صندوق سدايا الأمني المطابق تماماً في الشكل واللون
+# صندوق سدايا الأمني بلونه الكحلي السيادي الجديد
 st.markdown('<div class="sdaia-box-okular">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
 # منطقة رفع الملفات وزر التشغيل التنفيذي متجاوران داخل البطاقة
@@ -414,7 +414,7 @@ with col_btn:
 # إغلاق البطاقة البيضاء الكبرى
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 4. حاوية النتائج والفوتر (معدلة لتكون منسقة ومتسقة ومحاذاة لليمين)
+# 4. حاوية النتائج والفوتر
 result_container = st.container()
 
 # 5. معالجة البيانات والاتصال بـ BigQuery
