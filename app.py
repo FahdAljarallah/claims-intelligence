@@ -15,7 +15,6 @@ from PIL import Image
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
-# 1. إعداد الصفحة بتصميم سينمائي فاخر
 st.set_page_config(
     page_title="منصة الاستشارات التنفيذية | Executive Advisory Platform",
     page_icon="📊",
@@ -23,7 +22,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 2. حقن أنماط CSS لتوحيد الهوية البصرية السيادية (Cinematic Dark / Premium Theme)
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -115,28 +113,14 @@ def clean_number(val):
 
 def extract_structured_rows_from_pdf_bytes(file_bytes):
     all_structured_rows = []
-    
     try:
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
                 words = page.extract_words(use_text_flow=True)
                 if words:
-                    page_words = []
-                    for w in words:
-                        page_words.append({
-                            'left': w['x0'],
-                            'top': w['top'],
-                            'width': w['width'],
-                            'height': w['height'],
-                            'text': w['text'].strip()
-                        })
-                    
+                    page_words = [{'left': w['x0'], 'top': w['top'], 'width': w['width'], 'height': w['height'], 'text': w['text'].strip()} for w in words]
                     page_words = sorted(page_words, key=lambda w: (w['top'], w['left']))
-                    rows = []
-                    current_row = []
-                    current_top = -1
-                    tolerance = 6
-                    
+                    rows, current_row, current_top, tolerance = [], [], -1, 6
                     for w in page_words:
                         if current_top == -1 or abs(w['top'] - current_top) <= tolerance:
                             current_row.append(w)
@@ -159,25 +143,9 @@ def extract_structured_rows_from_pdf_bytes(file_bytes):
             images = pdf2image.convert_from_bytes(file_bytes)
             for img in images:
                 data = pytesseract.image_to_data(img, output_type=Output.DICT, lang='eng+ara')
-                n_boxes = len(data['text'])
-                words = []
-                for i in range(n_boxes):
-                    text = data['text'][i].strip()
-                    if text:
-                        words.append({
-                            'left': data['left'][i],
-                            'top': data['top'][i],
-                            'width': data['width'][i],
-                            'height': data['height'][i],
-                            'text': text
-                        })
-                
+                words = [{'left': data['left'][i], 'top': data['top'][i], 'width': data['width'][i], 'height': data['height'][i], 'text': data['text'][i].strip()} for i in range(len(data['text'])) if data['text'][i].strip()]
                 words = sorted(words, key=lambda w: (w['top'], w['left']))
-                rows = []
-                current_row = []
-                current_top = -1
-                tolerance = 12
-                
+                rows, current_row, current_top, tolerance = [], [], -1, 12
                 for w in words:
                     if current_top == -1 or abs(w['top'] - current_top) <= tolerance:
                         current_row.append(w)
@@ -199,7 +167,6 @@ def extract_structured_rows_from_pdf_bytes(file_bytes):
 
 def parse_single_file(file_bytes, file_name, session_id):
     monthly_rows = []
-    
     all_structured_rows = extract_structured_rows_from_pdf_bytes(file_bytes)
     if not all_structured_rows:
         return pd.DataFrame()
@@ -231,9 +198,7 @@ def parse_single_file(file_bytes, file_name, session_id):
             clean_class = re.sub(r'(class\s*type|class\s*tier|product\s*/\s*class|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
             if not clean_class and ":" in row_text:
                 clean_class = row_text.split(":")[-1].strip()
-            
             clean_class = re.split(r'\b(dental|inpatient|outpatient|optical|maternity|limit|deductible)\b', clean_class, flags=re.IGNORECASE)[0].strip()
-            
             if clean_class and "confidential" not in clean_class.lower():
                 clean_class = re.sub(r'[.:\-]$', '', clean_class).strip()
                 if clean_class and len(clean_class) < 20 and not re.search(r'[\u0600-\u06FF]', clean_class):
@@ -272,18 +237,14 @@ def parse_single_file(file_bytes, file_name, session_id):
         if date_match or is_tawuniya_format:
             if is_tawuniya_format:
                 parts = row_tokens[0].replace('-', '/').split('/')
-                m_val, y_val = int(parts[0]), int(parts[1])
-                row_date = f"{y_val}-{str(m_val).zfill(2)}"
+                row_date = f"{int(parts[1])}-{str(int(parts[0])).zfill(2)}"
             elif date_match:
                 if date_match.group(1) and date_match.group(2):
-                    y_val, m_val = int(date_match.group(1)), int(date_match.group(2))
-                    row_date = f"{y_val}-{str(m_val).zfill(2)}"
+                    row_date = f"{date_match.group(1)}-{str(int(date_match.group(2))).zfill(2)}"
                 elif date_match.group(3) and date_match.group(4):
-                    m_val, y_val = int(date_match.group(3)), int(date_match.group(4))
-                    row_date = f"{y_val}-{str(m_val).zfill(2)}"
+                    row_date = f"{date_match.group(4)}-{str(int(date_match.group(3))).zfill(2)}"
                 elif date_match.group(5) and date_match.group(6):
-                    y_val, m_val = int(date_match.group(5)), int(date_match.group(6))
-                    row_date = f"{y_val}-{str(m_val).zfill(2)}"
+                    row_date = f"{date_match.group(5)}-{str(int(date_match.group(6))).zfill(2)}"
                 else:
                     row_date = row_text[:15].strip()
             else:
@@ -305,14 +266,6 @@ def parse_single_file(file_bytes, file_name, session_id):
             nums = [clean_number(t) for t in filtered_tokens if re.search(r'\d', t)]
             
             if nums:
-                active_lives_val = int(nums[0]) if len(nums) > 0 else 100
-                claims_cnt_val = int(nums[1]) if len(nums) > 1 else 0
-                p_sar = float(nums[2]) if len(nums) > 2 else 0.0
-                p_vat = float(nums[3]) if len(nums) > 3 else 0.0
-                os_cnt = int(nums[4]) if len(nums) > 4 else 0
-                os_sar = float(nums[5]) if len(nums) > 5 else 0.0
-                os_vat = float(nums[6]) if len(nums) > 6 else 0.0
-
                 monthly_rows.append({
                     "session_id": session_id,
                     "created_at": created_at_ts,
@@ -322,12 +275,4 @@ def parse_single_file(file_bytes, file_name, session_id):
                     "class_tier": current_class_tier,
                     "section_type": "Monthly Claims",
                     "month_code": row_date,
-                    "active_lives": active_lives_val,
-                    "claims_count": claims_cnt_val,
-                    "paid_claims_sar": p_sar,
-                    "paid_claims_vat_sar": p_vat,
-                    "OS_claims_count": os_cnt,
-                    "OS_paid_claims_sar": os_sar,
-                    "OS_paid_claims_vat_sar": os_vat,
-                    "benefit_name": None,
-                    "provider_name": None
+                    "active_lives": int(nums[0]) if len
