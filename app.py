@@ -11,6 +11,7 @@ import pdf2image
 import pytesseract
 from pytesseract import Output
 from PIL import Image
+import requests
 
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
@@ -22,14 +23,14 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضبط اتجاه RTL، الألوان السيادية، والتنسيق الدقيق
+# حقن أنماط الـ CSS المتقدمة لضبط اتجاه RTL، التوزيع بالبكسل، ومطابقة تصميم Okular حرفياً
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* 1. خلفية الصفحة العاجية/البيضاء الفاخرة وتفعيل اتجاه RTL بالكامل */
+    /* 1. خلفية الصفحة الفانيلا/البيضة الفاخرة وتفعيل اتجاه RTL بالكامل */
     .stApp {
         background-color: #FBFBF9;
         color: #1E293B;
@@ -38,21 +39,21 @@ st.markdown("""
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     
-    /* 2. ترويسة اللغة في أقصى اليمين */
-    .lang-row {
+    /* 2. ترويسة اللغة في أقصى اليمين تماماً حسب التصميم الأصلي */
+    .lang-container {
         display: flex;
         justify-content: flex-end;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
         margin-bottom: 1.5rem;
         padding-top: 1rem;
-        direction: ltr;
+        direction: rtl;
     }
     
-    /* 3. البطاقة المركزية البيضاء النقية مع ظل ناعم */
+    /* 3. البطاقة المركزية الكبرى (Main White Card Container) */
     .main-container-card {
         background: #FFFFFF;
-        border: 1px solid rgba(226, 232, 240, 0.85);
+        border: 1px solid rgba(226, 232, 240, 0.9);
         border-radius: 16px;
         padding: 40px;
         box-shadow: 0 12px 35px rgba(14, 36, 58, 0.05);
@@ -98,7 +99,7 @@ st.markdown("""
         direction: rtl;
     }
     
-    /* 6. منطقة رفع الملفات وزر التشغيل التنفيذي */
+    /* 6. تنسيق عناصر رفع الملفات وزر التشغيل التنفيذي المتجاور */
     .stFileUploader {
         direction: rtl;
         text-align: right;
@@ -333,36 +334,39 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. ترويسة اللغة في أقصى اليمين بالتسلسل الصحيح: (English ثم العربية المحددة بالكحلي السيادي)
+# 1. ترويسة اللغة في أقصى اليمين تماماً بالترتيب الصحيح (English ثم العربية المحددة بالكحلي السيادي)
 col_space, col_en, col_ar = st.columns([6, 1, 1])
 with col_en:
     st.button("English", key="lang_en")
 with col_ar:
     st.button("العربية", key="lang_ar")
 
-# 2. الشعار الرسمي في المنتصف تماماً (Full Logo - 600-400 _4.png)[cite: 15]
+# 2. الشعار الرسمي في المنتصف تماماً (عبر رابط مباشر لضمان الظهور الفوري والدقيق)
 col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
 with col_logo_center:
     try:
-        logo_img = Image.open("Full Logo - 600-400 _4.png")
-        st.image(logo_img, use_container_width=True)
-    except Exception:
-        try:
-            logo_img = Image.open("Full Logo - 600-400 _3.png")
+        logo_url = "https://lh3.googleusercontent.com/d/11LDGzgTrWg18ubhLZ1p5ocf6DTL80e1W=w1000?authuser=0"
+        response = requests.get(logo_url)
+        if response.status_code == 200:
+            logo_img = Image.open(io.BytesIO(response.content))
             st.image(logo_img, use_container_width=True)
-        except Exception:
-            st.markdown("""
-                <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center; color: #0E243A; font-weight: 700;">
-                    FAHD ALJARALLAH LOGO
-                </div>
-            """, unsafe_allow_html=True)
+        else:
+            # محاولة قراءة الشعار محلياً في حال توفره
+            logo_img = Image.open("Full Logo - 600-400 _4.png")
+            st.image(logo_img, use_container_width=True)
+    except Exception:
+        st.markdown("""
+            <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center; color: #0E243A; font-weight: 700;">
+                FAHD ALJARALLAH LOGO
+            </div>
+        """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3. بطاقة المحتوى البيضاء الكبرى (Main White Card Container)
+# 3. بطاقة المحتوى البيضاء الكبرى (Main White Card Container) مطابقة لـ Okular
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
-# العنوان الرئيسي والنبذة التعريفية بتنسيق RTL سليم ومعالجة C-Level بدقة
+# العنوان الرئيسي والنبذة التعريفية بتنسيق RTL سليم
 st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
 st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
 
