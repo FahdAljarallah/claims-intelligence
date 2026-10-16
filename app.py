@@ -27,11 +27,11 @@ st.set_page_config(
 if 'lang' not in st.session_state:
     st.session_state.lang = 'ar'
 
-# 2. حقن أنماط الـ CSS المتقدمة وضبط ترويسة اللغة
 is_ar = st.session_state.lang == 'ar'
 text_align = "right" if is_ar else "left"
 direction = "rtl" if is_ar else "ltr"
 
+# 2. حقن أنماط الـ CSS لضبط الهيكل وزر اللغة تماماً مثل التصميم الأصلي
 st.markdown(f"""
     <style>
     #MainMenu {{visibility: hidden;}}
@@ -52,16 +52,6 @@ st.markdown(f"""
         margin: 0px !important;
         padding: 0px !important;
         display: none !important;
-    }}
-    
-    /* تنسيق زر اللغة العلوي ليكون أنيقاً وواضحاً */
-    .lang-container {{
-        display: flex;
-        justify-content: flex-end;
-        align-items: center;
-        max-width: 900px;
-        margin: 1rem auto 0.5rem auto;
-        padding: 0 10px;
     }}
     
     /* البطاقة المركزية الكبرى */
@@ -174,12 +164,12 @@ translations = {
 
 t = translations[st.session_state.lang]
 
-# 4. ترويسة زر اللغة التفاعلي الحقيقي (بشكل نظيف ومرتب)
-st.markdown('<div class="lang-container">', unsafe_allow_html=True)
-if st.button("English" if is_ar else "العربية", key="lang_btn_toggle"):
-    st.session_state.lang = 'en' if is_ar else 'ar'
-    st.rerun()
-st.markdown('</div>', unsafe_allow_html=True)
+# 4. ترويسة اللغة العلوية المتناسقة تماماً مع التصميم المعياري
+col_space, col_lang_btn = st.columns([10, 1])
+with col_lang_btn:
+    if st.button("English" if is_ar else "العربية", key="lang_toggle_top"):
+        st.session_state.lang = 'en' if is_ar else 'ar'
+        st.rerun()
 
 PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
@@ -250,9 +240,9 @@ def parse_single_file(file_bytes, file_name, session_id):
                     "claims_count": int(row.get('claims_count', 100)),
                     "paid_claims_sar": float(row.get('paid_claims_sar', 880000.0)),
                     "paid_claims_vat_sar": float(row.get('paid_claims_vat_sar', 0.0)),
-                    "OS_claims_count": int(row.get('OS_claims_count', 0)),
-                    "OS_paid_claims_sar": float(row.get('OS_paid_claims_sar', 0.0)),
-                    "OS_paid_claims_vat_sar": float(row.get('OS_paid_claims_vat_sar', 0.0)),
+                    "OS_claims_count": 0,
+                    "OS_paid_claims_sar": 0.0,
+                    "OS_paid_claims_vat_sar": 0.0,
                     "benefit_name": None,
                     "provider_name": None
                 })
