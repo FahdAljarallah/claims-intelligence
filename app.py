@@ -1,9 +1,17 @@
+import streamlit as st
+
+# 1. يجب أن يكون st.set_page_config هو أول أمر تنفيذي في التطبيق تماماً
+st.set_page_config(
+    page_title="منصة الاستشارات التنفيذية | Claims Intelligence",
+    page_layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
 import os
 import io
 import uuid
 import json
 import urllib.parse
-import streamlit as st
 import pandas as pd
 import re
 import pdfplumber
@@ -16,14 +24,7 @@ import requests
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
-# إعدادات الصفحة لتكون بعرض نظيف ومناسب (Wide Mode) مع الحفاظ على التمركز السيادي
-st.set_page_config(
-    page_title="منصة الاستشارات التنفيذية | Claims Intelligence",
-    page_layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
-# تخصيص الـ CSS لإلغاء العناصر الافتراضية وضبط تصميم الـ Light Mode السيادي بالكامل وتفعيل اتجاه RTL
+# تخصيص الـ CSS لإلغاء العناصر الافتراضية وضبط تصميم الـ Light Mode السيادي بالكامل
 st.markdown("""
     <style>
     /* خلفية الصفحة العامة لون فانيلا/بيج فاتح ونظيف */
@@ -294,8 +295,8 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. الهيدر العلوي (أزرار تبديل اللغات في أقصى اليمين بالتسلسل الصحيح مطابقة تماماً لـ Okular)
-header_col1, header_col2, header_col3 = st.columns([6, 2, 2])
+# 1. الهيدر العلوي (أزرار تبديل اللغات في أقصى اليمين بالتسلسل الصحيح)
+header_col1, header_col2, header_col3 = st.columns([2, 6, 2])
 with header_col3:
     lang_col1, lang_col2 = st.columns(2)
     with lang_col1:
@@ -326,7 +327,7 @@ with logo_col2:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3. البطاقة المركزية البيضاء (Main Container Card الاحتوائية بالكامل)
+# 3. البطاقة المركزية البيضاء (Main Container Card)
 st.markdown('<div class="main-card">', unsafe_allow_html=True)
 
 # العنوان الرئيسي والوصف الاستراتيجي
@@ -336,7 +337,7 @@ st.markdown('<div class="hero-subtitle">أداة تحليل استراتيجية
 # شريط الامتثال السيادي الثابت
 st.markdown('<div class="security-badge">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
-# منطقة رفع الملفات وزر التشغيل جنباً إلى جنب داخل نفس البطاقة المركزية
+# منطقة رفع الملفات وزر التشغيل جنباً إلى جنب
 col_upload, col_btn = st.columns([6, 4], gap="medium")
 
 with col_upload:
