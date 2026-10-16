@@ -176,7 +176,7 @@ translations = {
         'title': "منصة الاستشارات التنفيذية",
         'desc': "أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف قيمة الوثيقة عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.",
         'security': "🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات مرفوعة ويتم التخلص نهائياً من البيانات بعد مرور 24 ساعة.",
-        'upload': "اسحب ملفات البيانات هنا أو اضغط للاختيار (CSV / XLSX)",
+        'upload': "اسحب ملفات البيانات هنا أو اضغط للاختيار (PDF / CSV / XLSX)",
         'launch': "تشغيل اللوحة التنفيذية",
         'processing': "جاري معالجة الملفات وضخها إلى المستودع المركزي...",
         'ready': "📈 تقرير لوحة المؤشرات جاهز:",
@@ -187,7 +187,7 @@ translations = {
         'title': "Executive Advisory Platform",
         'desc': "Advanced strategic analysis tool for C-Level executives and boards of directors, enabling financial performance reading, cost inflation analysis, and policy value forecasting through live scenario simulation.",
         'security': "🛡️ 100% Fully Secure - Complying with SDAIA regulations and the Personal Data Protection Law (PDPL): No uploaded files are stored, and data is permanently purged after 24 hours.",
-        'upload': "Drag and drop data files here or click to browse (CSV / XLSX)",
+        'upload': "Drag and drop data files here or click to browse (PDF / CSV / XLSX)",
         'launch': "Launch Executive Dashboard",
         'processing': "Processing files and loading to the central data warehouse...",
         'ready': "📈 Executive Dashboard Report Ready:",
@@ -255,6 +255,32 @@ def extract_structured_rows_from_pdf_bytes(file_bytes):
                     all_structured_rows.extend(rows)
     except Exception:
         pass
+
+    if not all_structured_rows:
+        try:
+            images = pdf2image.convert_from_bytes(file_bytes)
+            for img in images:
+                data = pytesseract.image_to_data(img, output_type=Output.DICT, lang='eng+ara')
+                words = [{'left': data['left'][i], 'top': data['top'][i], 'width': data['width'][i], 'height': data['height'][i], 'text': data['text'][i].strip()} for i in range(len(data['text'])) if data['text'][i].strip()]
+                words = sorted(words, key=lambda w: (w['top'], w['left']))
+                rows, current_row, current_top, tolerance = [], [], -1, 12
+                for w in words:
+                    if current_top == -1 or abs(w['top'] - current_top) <= tolerance:
+                        current_row.append(w)
+                        if current_top == -1:
+                            current_top = w['top']
+                    else:
+                        current_row = sorted(current_row, key=lambda x: x['left'])
+                        rows.append(current_row)
+                        current_row = [w]
+                        current_top = w['top']
+                if current_row:
+                    current_row = sorted(current_row, key=lambda x: x['left'])
+                    rows.append(current_row)
+                all_structured_rows.extend(rows)
+        except Exception:
+            pass
+            
     return all_structured_rows
 
 def parse_single_file(file_bytes, file_name, session_id):
@@ -286,7 +312,129 @@ def parse_single_file(file_bytes, file_name, session_id):
             return pd.DataFrame(monthly_rows)
         except Exception:
             pass
-    return pd.DataFrame()
+
+    # معالجة ملفات الـ PDF الشاملة والمطالبات
+    monthly_rows = []
+    all_structured_rows = extract_structured_rows_from_pdf_bytes(file_bytes)
+    if not all_structured_rows:
+        return pd.DataFrame()
+
+    current_policy_year = ""
+    current_inception = ""
+    current_class_tier = "CLASS VIP"
+    seen_months = set()
+    
+    for row in all_structured_rows:
+        row_tokens = [w['text'] for w in row]
+        row_text = " ".join(row_tokens)
+        line_lower = row_text.lower()
+        
+        if "confidential" in line_lower:
+            continue
+            
+        if "policy year" in line_lower or "last policy year" in line_lower or "سنة الوثيقة" in line_lower or "period" in line_lower:
+            current_policy_year = row_text.strip()
+            continue
+            
+        if "inception" in line_lower:
+            date_m = re.search(r'\b(0?[1-9]|[12][0-9]|3[01])[-/](0?[1-9]|1[0-2])[-/](20\d{2})\b', row_text)
+            if date_m:
+                current_inception = date_m.group(0)
+            continue
+            
+        if "class" in line_lower or "tier" in line_lower or "الفئة" in line_lower or "product" in line_lower:
+            clean_class = re.sub(r'(class\s*type|class\s*tier|product\s*/\s*class|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
+            if not clean_class and ":" in row_text:
+                clean_class = row_text.split(":")[-1].strip()
+            clean_class = re.split(r'\b(dental|inpatient|outpatient|optical|maternity|limit|deductible)\b', clean_class, flags=re.IGNORECASE)[0].strip()
+            if clean_class and "confidential" not in clean_class.lower():
+                clean_class = re.sub(r'[.:\-]$', '', clean_class).strip()
+                if clean_class and len(clean_class) < 20 and not re.search(r'[\u0600-\u06FF]', clean_class):
+                    current_class_tier = clean_class
+            continue
+
+        created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
+        
+        if "number of lives at start" in line_lower or "lives at start" in line_lower:
+            nums_lives = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
+            lives_val = int(nums_lives[0]) if nums_lives else 100
+            monthly_rows.append({
+                "session_id": session_id,
+                "created_at": created_at_ts,
+                "policy_year": current_policy_year or "LAST POLICY YEAR",
+                "inception_date": current_inception or "",
+                "table_header": file_name,
+                "class_tier": current_class_tier,
+                "section_type": "Monthly Claims",
+                "month_code": "Number of lives at start",
+                "active_lives": lives_val,
+                "claims_count": 0,
+                "paid_claims_sar": 0.0,
+                "paid_claims_vat_sar": 0.0,
+                "OS_claims_count": 0,
+                "OS_paid_claims_sar": 0.0,
+                "OS_paid_claims_vat_sar": 0.0,
+                "benefit_name": None,
+                "provider_name": None
+            })
+            continue
+
+        date_match = re.search(r'\b(20\d{2})(0[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', line_lower)
+        is_tawuniya_format = bool(row_tokens and re.match(r'^(0?[1-9]|1[0-2])[\/\-](20\d{2})$', row_tokens[0]))
+
+        if date_match or is_tawuniya_format:
+            if is_tawuniya_format:
+                parts = row_tokens[0].replace('-', '/').split('/')
+                row_date = f"{int(parts[1])}-{str(int(parts[0])).zfill(2)}"
+            elif date_match:
+                if date_match.group(1) and date_match.group(2):
+                    row_date = f"{date_match.group(1)}-{str(int(date_match.group(2))).zfill(2)}"
+                elif date_match.group(3) and date_match.group(4):
+                    row_date = f"{date_match.group(4)}-{str(int(date_match.group(3))).zfill(2)}"
+                elif date_match.group(5) and date_match.group(6):
+                    row_date = f"{date_match.group(5)}-{str(int(date_match.group(6))).zfill(2)}"
+                else:
+                    row_date = row_text[:15].strip()
+            else:
+                row_date = row_text[:15].strip()
+            
+            month_key = (file_name, current_class_tier, row_date)
+            if month_key in seen_months:
+                continue
+            seen_months.add(month_key)
+            
+            filtered_tokens = []
+            for idx, t in enumerate(row_tokens):
+                if idx == 0 and (t in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'] or '/' in t or '-' in t):
+                    continue
+                if re.search(r'\b20\d{2}(0[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-]20\d{2}\b|\b20\d{2}[\/\-](0?[1-9]|1[0-2])\b', t):
+                    continue
+                filtered_tokens.append(t)
+            
+            nums = [clean_number(t) for t in filtered_tokens if re.search(r'\d', t)]
+            
+            if nums:
+                monthly_rows.append({
+                    "session_id": session_id,
+                    "created_at": created_at_ts,
+                    "policy_year": current_policy_year or "LAST POLICY YEAR",
+                    "inception_date": current_inception or "",
+                    "table_header": file_name,
+                    "class_tier": current_class_tier,
+                    "section_type": "Monthly Claims",
+                    "month_code": row_date,
+                    "active_lives": int(nums[0]) if len(nums) > 0 else 100,
+                    "claims_count": int(nums[1]) if len(nums) > 1 else 0,
+                    "paid_claims_sar": float(nums[2]) if len(nums) > 2 else 0.0,
+                    "paid_claims_vat_sar": float(nums[3]) if len(nums) > 3 else 0.0,
+                    "OS_claims_count": int(nums[4]) if len(nums) > 4 else 0,
+                    "OS_paid_claims_sar": float(nums[5]) if len(nums) > 5 else 0.0,
+                    "OS_paid_claims_vat_sar": float(nums[6]) if len(nums) > 6 else 0.0,
+                    "benefit_name": None,
+                    "provider_name": None
+                })
+
+    return pd.DataFrame(monthly_rows)
 
 col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
 with col_logo_center:
@@ -363,7 +511,6 @@ if uploaded_files and launch_button:
                         encoded_params = urllib.parse.quote(json.dumps(params_data))
                         looker_url = f"{base_url}/page/p_yr47xbgg7d?params={encoded_params}"
                         
-                        # إجبار الرابط على الفتح في نفس الصفحة عبر target="_self" في HTML نقي
                         st.markdown(f"""
                             <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 24px; margin-top: 20px; text-align: {text_align}; direction: {direction}; box-shadow: 0 1px 4px rgba(0,0,0,0.02); max-width: 900px; margin-left: auto; margin-right: auto;">
                                 <h3 style="color: #0E243A; font-size: 1.2rem; font-weight: 700; margin-bottom: 12px;">{t['ready']}</h3>
