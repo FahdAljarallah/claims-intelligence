@@ -30,7 +30,7 @@ is_ar = st.session_state.lang == 'ar'
 text_align = "right" if is_ar else "left"
 direction = "rtl" if is_ar else "ltr"
 
-# حقن أنماط الـ CSS المتقدمة مع إجبار عناصر أزرار اللغة على إظهار النصوص بالألوان الصحيحة
+# حقن أنماط الـ CSS المتقدمة مع استهداف دقيق لوسوم النصوص داخل الأزرار
 st.markdown(f"""
     <style>
     #MainMenu {{visibility: hidden;}}
@@ -69,19 +69,6 @@ st.markdown(f"""
         background-color: #17324D;
     }}
     
-    /* تخصيص دقيق لترويسة أزرار اللغة لضمان ظهور النصوص بوضوح وتجنب المربعات السوداء */
-    div[data-testid="column"] .stButton button {{
-        height: 36px !important;
-        padding: 0px 12px !important;
-        font-size: 0.85rem !important;
-        font-weight: 600 !important;
-        border-radius: 6px !important;
-        box-shadow: none !important;
-    }}
-    div[data-testid="column"] .stButton button * {{
-        color: inherit !important;
-    }}
-
     .main-container-card {{
         background: #FFFFFF;
         border: 1px solid rgba(226, 232, 240, 0.9);
@@ -173,7 +160,7 @@ translations = {
 
 t = translations[st.session_state.lang]
 
-# أزرار اللغة المتجاوران في أعلى الصفحة بتنسيق دقيق واحترافي
+# أزرار اللغة المتجاوران في أعلى الصفحة بتنسيق دقيق ومضبوط
 col_space, col_en, col_ar = st.columns([10, 0.9, 0.9])
 
 with col_en:
@@ -186,8 +173,14 @@ with col_en:
             background-color: {en_bg} !important;
             color: {en_color} !important;
             border: 1.5px solid #0E243A !important;
+            font-weight: 600 !important;
+            border-radius: 6px !important;
+            height: 36px !important;
+            font-size: 0.85rem !important;
+            box-shadow: none !important;
         }}
-        div[data-testid="column"]:nth-of-type(2) button * {{
+        div[data-testid="column"]:nth-of-type(2) button p, 
+        div[data-testid="column"]:nth-of-type(2) button span {{
             color: {en_color} !important;
         }}
         </style>
@@ -206,8 +199,14 @@ with col_ar:
             background-color: {ar_bg} !important;
             color: {ar_color} !important;
             border: 1.5px solid #0E243A !important;
+            font-weight: 600 !important;
+            border-radius: 6px !important;
+            height: 36px !important;
+            font-size: 0.85rem !important;
+            box-shadow: none !important;
         }}
-        div[data-testid="column"]:nth-of-type(3) button * {{
+        div[data-testid="column"]:nth-of-type(3) button p, 
+        div[data-testid="column"]:nth-of-type(3) button span {{
             color: {ar_color} !important;
         }}
         </style>
