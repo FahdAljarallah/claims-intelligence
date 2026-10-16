@@ -22,14 +22,14 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة مطابقة للمواصفات السيادية بدقة متناهية
+# حقن أنماط الـ CSS المتقدمة لضبط اتجاه RTL، الألوان السيادية، والتنسيق الدقيق
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* 1. خلفية الصفحة البيضاء النقية / العاجي الهادئ */
+    /* 1. خلفية الصفحة العاجية/البيضاء الفاخرة وتفعيل اتجاه RTL بالكامل */
     .stApp {
         background-color: #FBFBF9;
         color: #1E293B;
@@ -38,17 +38,18 @@ st.markdown("""
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     
-    /* 2. صف تغيير اللغة في أعلى اليمين */
-    .lang-container {
+    /* 2. ترويسة اللغة في أقصى اليمين */
+    .lang-row {
         display: flex;
-        justify-content: flex-start;
+        justify-content: flex-end;
         align-items: center;
         gap: 10px;
         margin-bottom: 1.5rem;
         padding-top: 1rem;
+        direction: ltr;
     }
     
-    /* 3. البطاقة المركزية الكبرى (Main Card Container) */
+    /* 3. البطاقة المركزية البيضاء النقية مع ظل ناعم */
     .main-container-card {
         background: #FFFFFF;
         border: 1px solid rgba(226, 232, 240, 0.85);
@@ -56,9 +57,11 @@ st.markdown("""
         padding: 40px;
         box-shadow: 0 12px 35px rgba(14, 36, 58, 0.05);
         margin-bottom: 2rem;
+        direction: rtl;
+        text-align: right;
     }
     
-    /* 4. العنوان الرئيسي والوصف الإستراتيجي */
+    /* 4. العنوان الرئيسي والوصف الاستراتيجي */
     .platform-title {
         font-size: 2.1rem;
         font-weight: 800;
@@ -92,6 +95,7 @@ st.markdown("""
         line-height: 1.6;
         font-weight: 600;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+        direction: rtl;
     }
     
     /* 6. منطقة رفع الملفات وزر التشغيل التنفيذي */
@@ -126,6 +130,7 @@ st.markdown("""
         margin-top: 3rem;
         margin-bottom: 2rem;
         letter-spacing: 0.3px;
+        direction: rtl;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -328,22 +333,22 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. الهيدر العلوي: أزرار تبديل اللغة (English / العربية) في أعلى اليمين
+# 1. ترويسة اللغة في أقصى اليمين بالتسلسل الصحيح: (English ثم العربية المحددة بالكحلي السيادي)
 col_space, col_en, col_ar = st.columns([6, 1, 1])
 with col_en:
     st.button("English", key="lang_en")
 with col_ar:
     st.button("العربية", key="lang_ar")
 
-# 2. الشعار الرسمي المرفق في المنتصف تماماً (Full Logo - 600-400 _3.png)
+# 2. الشعار الرسمي في المنتصف تماماً (Full Logo - 600-400 _4.png)[cite: 15]
 col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
 with col_logo_center:
     try:
-        logo_img = Image.open("Full Logo - 600-400 _3.png")
+        logo_img = Image.open("Full Logo - 600-400 _4.png")
         st.image(logo_img, use_container_width=True)
     except Exception:
         try:
-            logo_img = Image.open("Full Logo - 600-400 _2.png")
+            logo_img = Image.open("Full Logo - 600-400 _3.png")
             st.image(logo_img, use_container_width=True)
         except Exception:
             st.markdown("""
@@ -354,17 +359,17 @@ with col_logo_center:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3. التسلسل الهرمي للبطاقة المركزية (The Card Hierarchy)
+# 3. بطاقة المحتوى البيضاء الكبرى (Main White Card Container)
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
-# العنوان الرئيسي والوصف الإستراتيجي
+# العنوان الرئيسي والنبذة التعريفية بتنسيق RTL سليم ومعالجة C-Level بدقة
 st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
 st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
 
-# شريط الأمان والامتثال (سدايا) مع درع الأمان والنص الحرفي
+# شارة سدايا الأمنية بشريط عرضي متناسق
 st.markdown('<div class="sdaia-box">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
-# في الأسفل تماماً: صندوق رفع الملفات النظيف وزر "تشغيل اللوحة التنفيذية" بجواره بشكل منسق ومدروس
+# منطقة رفع الملفات وزر التشغيل التنفيذي بتنسيق متجاور ودقيق
 col_upload, col_btn = st.columns([1.3, 1])
 
 with col_upload:
@@ -380,7 +385,7 @@ with col_btn:
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 4. الفوتر بالأسفل تماماً بنصه الثابت المعتمد
+# 4. الفوتر المتمركز بالأسفل تماماً
 st.markdown(
     '<p class="sovereign-footer">© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية.</p>',
     unsafe_allow_html=True
