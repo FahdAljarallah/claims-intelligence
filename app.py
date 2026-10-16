@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضبط الهيكل وإزالة الفراغات الوهمية
+# حقن أنماط الـ CSS المتقدمة لضبط الهيكل، أزرار اللغة، والبطاقة البيضاء المتكاملة
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -353,18 +353,39 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# 2. إزالة صندوق الشعار الفارغ نهائياً، والبدء مباشرة بالبطاقة المركزية الكبرى
+# 2. إرجاع الشعار الرسمي في المنتصف تماماً (داخل الصندوق النظيف)
+col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
+with col_logo_center:
+    try:
+        logo_url = "https://lh3.googleusercontent.com/d/11LDGzgTrWg18ubhLZ1p5ocf6DTL80e1W=w1000?authuser=0"
+        response = requests.get(logo_url, timeout=5)
+        if response.status_code == 200:
+            logo_img = Image.open(io.BytesIO(response.content))
+            st.image(logo_img, use_container_width=True)
+        else:
+            logo_img = Image.open("Full Logo - 600-400 _4.png")
+            st.image(logo_img, use_container_width=True)
+    except Exception:
+        st.markdown("""
+            <div style="width: 100%; height: 100px; display: flex; justify-content: center; align-items: center; color: #0E243A; font-weight: 800; font-size: 1.3rem;">
+                فهد الجارالله
+            </div>
+        """, unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# 3. فتح البطاقة المركزية الكبرى
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
 # صندوق العنوان والشرح المنفصل
 st.markdown("""
     <div class="title-desc-box">
         <div class="platform-title">منصة الاستشارات التنفيذية</div>
-        <div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجلس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>
+        <div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>
     </div>
 """, unsafe_allow_html=True)
 
-# صندوق سدايا الأمني المطابق في الشكل واللون
+# صندوق سدايا الأمني المطابق تماماً في الشكل واللون
 st.markdown('<div class="sdaia-box-okular">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
 # منطقة رفع الملفات وزر التشغيل التنفيذي متجاوران داخل البطاقة
@@ -384,10 +405,10 @@ with col_btn:
 # إغلاق البطاقة البيضاء الكبرى
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 3. حاوية النتائج والفوتر (تظهر تحت العناصر بالكامل لتجنب التداخل)
+# 4. حاوية النتائج والفوتر (تظهر تحت العناصر بالكامل)
 result_container = st.container()
 
-# 4. معالجة البيانات والاتصال بـ BigQuery
+# 5. معالجة البيانات والاتصال بـ BigQuery
 if uploaded_files and launch_button:
     with result_container:
         current_sess = f"sess_{str(uuid.uuid4())[:8]}"
@@ -432,7 +453,7 @@ if uploaded_files and launch_button:
             else:
                 st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة.")
 
-# 5. الفوتر السيادي السفلي (مستقر تماماً في الأسفل وتحت النتائج)
+# 6. الفوتر السيادي السفلي (مستقر تماماً في الأسفل)
 st.markdown(
     '<p class="sovereign-footer">© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية.</p>',
     unsafe_allow_html=True
