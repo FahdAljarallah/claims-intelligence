@@ -18,11 +18,11 @@ from google.oauth2.service_account import Credentials
 st.set_page_config(
     page_title="منصة الاستشارات التنفيذية | Executive Advisory Platform",
     page_icon="📊",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="collapsed"
 )
 
-# تصميم نظيف وآمن يمنع اختفاء العناصر ويحافظ على الثيم السينمائي الداكن مع اتجاه RTL
+# حقن أنماط CSS دقيقة تطابق التصميم السينمائي الفاخر للملف المرفق
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -30,37 +30,90 @@ st.markdown("""
     header {visibility: hidden;}
     
     .stApp {
-        background-color: #030712;
+        background: radial-gradient(circle at 50% 20%, #111827 0%, #030712 100%);
         color: #f3f4f6;
+        direction: rtl;
+        text-align: right;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    
+    /* أزرار اللغات في الأعلى */
+    .lang-container {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-bottom: 2rem;
+    }
+    
+    /* البطاقة السينمائية الرئيسية */
+    .cinematic-card {
+        background: rgba(17, 24, 39, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        padding: 40px;
+        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(16px);
+        margin-bottom: 2rem;
+    }
+    
+    .platform-title {
+        font-size: 2.2rem;
+        font-weight: 800;
+        color: #ffffff;
+        text-align: right;
+        margin-bottom: 1rem;
+        letter-spacing: -0.5px;
+    }
+    
+    .platform-desc {
+        font-size: 1.02rem;
+        color: #9ca3af;
+        text-align: right;
+        line-height: 1.7;
+        margin-bottom: 2rem;
+    }
+    
+    .sdaia-badge {
+        background: rgba(16, 185, 129, 0.08);
+        border: 1px solid rgba(16, 185, 129, 0.2);
+        color: #34d399;
+        padding: 14px 18px;
+        border-radius: 10px;
+        font-size: 0.9rem;
+        text-align: right;
+        margin-bottom: 2rem;
+        line-height: 1.5;
+    }
+    
+    /* تنسيق صندوق رفع الملفات */
+    .stFileUploader {
         direction: rtl;
         text-align: right;
     }
     
-    .main-header {
-        font-size: 2.2rem;
-        font-weight: 800;
-        color: #ffffff;
-        text-align: center;
-        margin-bottom: 1rem;
-    }
-    
-    .main-desc {
+    /* زر التشغيل التنفيذي */
+    .stButton button {
+        width: 100%;
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+        color: white;
+        font-weight: 700;
+        padding: 0.85rem 1.5rem;
+        border-radius: 10px;
+        border: none;
+        box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
+        transition: all 0.3s ease;
         font-size: 1.05rem;
-        color: #9ca3af;
-        text-align: center;
-        line-height: 1.6;
-        margin-bottom: 2rem;
+    }
+    .stButton button:hover {
+        background: linear-gradient(135deg, #1d4ed8 100%, #1e40af 100%);
+        box-shadow: 0 6px 20px rgba(37, 99, 235, 0.6);
     }
     
-    .sdaia-box {
-        background-color: rgba(16, 185, 129, 0.1);
-        border: 1px solid rgba(16, 185, 129, 0.3);
-        color: #34d399;
-        padding: 1rem;
-        border-radius: 8px;
+    .footer-text {
         text-align: center;
-        margin-bottom: 2rem;
-        font-size: 0.95rem;
+        color: #6b7280;
+        font-size: 0.85rem;
+        margin-top: 3rem;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -263,25 +316,42 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# واجهة المستخدم السيادية النظيفة بدون تداخل
-col_l, col_r = st.columns([10, 2])
-with col_r:
-    st.button("العربية / English", key="lang_btn")
+# 1. شريط أزرار اللغة العلوي (العربية / English)
+col_space, col_ar, col_en = st.columns([6, 1, 1])
+with col_ar:
+    st.button("العربية", key="lang_ar")
+with col_en:
+    st.button("English", key="lang_en")
 
-st.markdown('<div class="main-header">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
-st.markdown('<div class="main-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
-st.markdown('<div class="sdaia-box">🔒 آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
+# 2. حاوية البطاقة السينمائية المطابقة تماماً للملف المرفق
+st.markdown('<div class="cinematic-card">', unsafe_allow_html=True)
 
-uploaded_files = st.file_uploader("اسحب ملفات البيانات هنا أو اضغط للاختيار (PDF / CSV / XLSX)", type=["pdf", "csv", "xlsx"], accept_multiple_files=True)
+st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
+st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="sdaia-badge">🔒 آمن بالكامل %100 - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
+
+# عنصر رفع الملفات
+uploaded_files = st.file_uploader(
+    "اسحب ملفات البيانات هنا أو اضغط للاختيار (CSV / XLSX / PDF)",
+    type=["pdf", "csv", "xlsx"],
+    accept_multiple_files=True
+)
+
 st.markdown("<br>", unsafe_allow_html=True)
+
+# زر التشغيل التنفيذي
 launch_button = st.button("تشغيل اللوحة التنفيذية", type="primary")
 
-st.markdown("<br><br>", unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
+
+# 3. التذييل (Footer) السيادي
 st.markdown(
-    '<p style="text-align: center; color: #6b7280; font-size: 0.85rem;">© 2026 فهد الجار الله - جميع حقوق محفوظة لبيئة العمل السيادية</p>',
+    '<p class="footer-text">2026 فهد الجار الله - جميع حقوق محفوظة لبيئة العمل السيادية</p>',
     unsafe_allow_html=True
 )
 
+# 4. معالجة الملفات والاتصال بـ BigQuery (دون المساس بكود المعالجة الأساسي)
 if uploaded_files and launch_button:
     current_sess = f"sess_{str(uuid.uuid4())[:8]}"
     st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
