@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS لإجبار كل العناصر على الدخول داخل الكرت الأبيض المركزي وترتيب الهيكل
+# حقن أنماط الـ CSS لإجبار التصميم السينمائي النظيف
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -38,17 +38,7 @@ st.markdown("""
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     
-    /* الهيدر العلوي */
-    .top-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        max-width: 900px;
-        margin: 0 auto 1.5rem auto;
-        padding: 1rem 0;
-    }
-
-    /* البطاقة المركزية البيضاء الكبرى التي تحتضن كافة المحتوى */
+    /* البطاقة المركزية البيضاء الكبرى */
     .main-container-card {
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
@@ -56,7 +46,7 @@ st.markdown("""
         padding: 40px 50px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
         max-width: 900px;
-        margin: 0 auto;
+        margin: 2rem auto;
         direction: rtl;
         text-align: right;
     }
@@ -89,18 +79,19 @@ st.markdown("""
         font-weight: 600;
     }
 
+    /* تنسيق زر التشغيل ليتطابق تماماً مع التصميم */
     .stButton button {
         width: 100%;
-        background-color: #0E243A;
-        color: #FFFFFF;
-        font-weight: 700;
-        padding: 0.75rem 1rem;
-        border-radius: 8px;
-        border: none;
-        height: 48px;
+        background-color: #0E243A !important;
+        color: #FFFFFF !important;
+        font-weight: 700 !important;
+        padding: 0.75rem 1rem !important;
+        border-radius: 8px !important;
+        border: none !important;
+        height: 48px !important;
     }
     .stButton button:hover {
-        background-color: #17324D;
+        background-color: #17324D !important;
     }
     
     .sovereign-footer {
@@ -125,42 +116,6 @@ def get_bq_client(project_id):
         creds_dict["private_key"] = pk
     credentials = Credentials.from_service_account_info(creds_dict)
     return bigquery.Client(credentials=credentials, project=project_id)
-
-def clean_number(val):
-    try:
-        clean_str = str(val).replace('SAR', '').replace('ر.س', '').replace(',', '').strip()
-        match = re.search(r'[-+]?\d*\.?\d+', clean_str)
-        return float(match.group()) if match else 0.0
-    except Exception:
-        return 0.0
-
-def extract_structured_rows_from_pdf_bytes(file_bytes):
-    all_structured_rows = []
-    try:
-        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-            for page in pdf.pages:
-                words = page.extract_words(use_text_flow=True)
-                if words:
-                    page_words = [{'left': w['x0'], 'top': w['top'], 'width': w['width'], 'height': w['height'], 'text': w['text'].strip()} for w in words]
-                    page_words = sorted(page_words, key=lambda w: (w['top'], w['left']))
-                    rows, current_row, current_top, tolerance = [], [], -1, 6
-                    for w in page_words:
-                        if current_top == -1 or abs(w['top'] - current_top) <= tolerance:
-                            current_row.append(w)
-                            if current_top == -1:
-                                current_top = w['top']
-                        else:
-                            current_row = sorted(current_row, key=lambda x: x['left'])
-                            rows.append(current_row)
-                            current_row = [w]
-                            current_top = w['top']
-                    if current_row:
-                        current_row = sorted(current_row, key=lambda x: x['left'])
-                        rows.append(current_row)
-                    all_structured_rows.extend(rows)
-    except Exception:
-        pass
-    return all_structured_rows
 
 def parse_single_file(file_bytes, file_name, session_id):
     if file_name.lower().endswith(('.xlsx', '.xls', '.csv')):
@@ -193,26 +148,24 @@ def parse_single_file(file_bytes, file_name, session_id):
             pass
     return pd.DataFrame()
 
-# 1. الهيدر العلوي المنظم (الشعار يمين، أزرار اللغات يسار)
+# 1. الهيدر العلوي المنظم بدقة (أزرار اللغة يسار، الشعار يمين)
 col_h1, col_h2 = st.columns([1, 1])
 with col_h1:
     st.markdown("""
-        <div style="display: flex; gap: 8px;">
-            <span style="border: 1px solid #0E243A; color: #0E243A; padding: 4px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: 600;">English</span>
+        <div style="display: flex; gap: 8px; align-items: center; padding-top: 10px;">
+            <span style="border: 1px solid #0E243A; color: #0E243A; padding: 4px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; background: transparent;">English</span>
             <span style="background-color: #0E243A; color: #FFFFFF; padding: 4px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: 600;">العربية</span>
         </div>
     """, unsafe_allow_html=True)
 
 with col_h2:
     st.markdown("""
-        <div style="text-align: left; color: #0E243A; font-weight: 800; font-size: 1.1rem;">
+        <div style="text-align: left; color: #0E243A; font-weight: 800; font-size: 1.1rem; padding-top: 10px;">
             فهد الجارالله <span style="font-size: 0.7rem; color: #64748B;">FAHD ALJARALLAH</span>
         </div>
     """, unsafe_allow_html=True)
 
-st.markdown("<br>", unsafe_allow_html=True)
-
-# 2. فتح البطاقة المركزية الكبرى (Main Container Card) لحصر كافة المحتوى بداخلها
+# 2. فتح البطاقة المركزية الكبرى
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
 st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
@@ -220,29 +173,25 @@ st.markdown('<div class="platform-desc">أداة تحليل استراتيجية
 
 st.markdown('<div class="sdaia-box">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
-# دمج زر الرفع وزر التشغيل بطريقة متناسقة تماماً داخل الكرت
-col_upload, col_btn = st.columns([1.2, 1])
+# حقل الرفع وزر التشغيل مرتبة بداخل الكرت
+uploaded_files = st.file_uploader(
+    "اسحب ملفات البيانات هنا أو اضغط للاختيار (PDF / CSV / XLSX)",
+    type=["pdf", "csv", "xlsx", "xls"],
+    accept_multiple_files=True
+)
 
-with col_upload:
-    uploaded_files = st.file_uploader(
-        "اسحب ملفات البيانات هنا أو اضغط للاختيار (PDF / CSV / XLSX)",
-        type=["pdf", "csv", "xlsx", "xls"],
-        accept_multiple_files=True
-    )
-
-with col_btn:
-    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    launch_button = st.button("تشغيل اللوحة التنفيذية", type="primary")
+st.markdown("<br>", unsafe_allow_html=True)
+launch_button = st.button("تشغيل اللوحة التنفيذية", use_container_width=True)
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 3. الفوتر السيادي السفلي
+# 3. الفوتر السفلي
 st.markdown(
     '<p class="sovereign-footer">© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية.</p>',
     unsafe_allow_html=True
 )
 
-# 4. معالجة البيانات والاتصال بقاعدة البيانات
+# 4. معالجة البيانات والاتصال
 if uploaded_files and launch_button:
     current_sess = f"sess_{str(uuid.uuid4())[:8]}"
     st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
