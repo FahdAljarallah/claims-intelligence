@@ -27,11 +27,10 @@ st.set_page_config(
 if 'lang' not in st.session_state:
     st.session_state.lang = 'ar'
 
-# دالة لتغيير اللغة
 def set_lang(l):
     st.session_state.lang = l
 
-# 2. حقن أنماط الـ CSS المتقدمة مع التكيف مع اتجاهات اللغتين (RTL / LTR)
+# 2. حقن أنماط الـ CSS المتقدمة (تم تصحيح أقواس الـ CSS لتتوافق تماماً مع F-String)
 is_ar = st.session_state.lang == 'ar'
 text_align = "right" if is_ar else "left"
 direction = "rtl" if is_ar else "ltr"
@@ -48,7 +47,7 @@ st.markdown(f"""
         direction: {direction};
         text-align: {text_align};
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
+    }}
     
     div:empty, .element-container:empty {{
         width: 0px !important;
@@ -56,7 +55,7 @@ st.markdown(f"""
         margin: 0px !important;
         padding: 0px !important;
         display: none !important;
-    }
+    }}
     
     /* البطاقة المركزية الكبرى */
     .main-container-card {{
@@ -72,7 +71,7 @@ st.markdown(f"""
         max-width: 900px;
         margin-left: auto;
         margin-right: auto;
-    }
+    }}
     
     /* صندوق العنوان والشرح المنفصل */
     .title-desc-box {{
@@ -149,7 +148,6 @@ translations = {
         'upload': "اسحب ملفات البيانات هنا أو اضغط للاختيار (CSV / XLSX)",
         'launch': "تشغيل اللوحة التنفيذية",
         'processing': "جاري معالجة الملفات وضخها إلى المستودع المركزي...",
-        'success': "تم رفع بيانات المطالبات الشهرية بنجاح لـ BigQuery برقم الجلسة: ",
         'ready': "📈 تقرير لوحة المؤشرات جاهز:",
         'link': "اضغط هنا لفتح لوحة البيانات في Looker Studio",
         'footer': "© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية."
@@ -161,7 +159,6 @@ translations = {
         'upload': "Drag and drop data files here or click to browse (CSV / XLSX)",
         'launch': "Launch Executive Dashboard",
         'processing': "Processing files and loading to the central data warehouse...",
-        'success': "Monthly claims data successfully uploaded to BigQuery with Session ID: ",
         'ready': "📈 Executive Dashboard Report Ready:",
         'link': "Click here to open the dashboard in Looker Studio",
         'footer': "© 2026 Fahd Aljarallah - All rights reserved for the Sovereign Workspace."
@@ -170,7 +167,7 @@ translations = {
 
 t = translations[st.session_state.lang]
 
-# 4. ترويسة اللغة التفاعلية الحقيقية
+# 4. ترويسة اللغة التفاعلية
 col_lang1, col_lang2, col_lang3 = st.columns([8, 1, 1])
 with col_lang2:
     if st.button("English" if is_ar else "العربية"):
