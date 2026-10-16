@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضبط اتجاه RTL، احواء كافة العناصر داخل البطاقة البيضاء، ومطابقة تصميم Okular حرفياً
+# حقن أنماط الـ CSS المتقدمة لضبط اتجاه RTL واحتواء كافة عناصر المحتوى داخل البطاقة البيضاء الكبرى مطابقة لتصميم Okular
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -412,8 +412,6 @@ if uploaded_files and launch_button:
                 table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
                 errors = bq_client.insert_rows_json(table_ref, records_to_insert)
                 
-                if errors == == []: # syntax check safety
-                    pass
                 if errors == []:
                     st.success(f"تم رفع بيانات المطالبات الشهرية بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
                     base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
