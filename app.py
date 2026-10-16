@@ -23,22 +23,34 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضبط الهيكل
-st.markdown("""
+# 1. إدارة حالة اللغة (افتراضياً العربية)
+if 'lang' not in st.session_state:
+    st.session_state.lang = 'ar'
+
+# دالة لتغيير اللغة
+def set_lang(l):
+    st.session_state.lang = l
+
+# 2. حقن أنماط الـ CSS المتقدمة مع التكيف مع اتجاهات اللغتين (RTL / LTR)
+is_ar = st.session_state.lang == 'ar'
+text_align = "right" if is_ar else "left"
+direction = "rtl" if is_ar else "ltr"
+
+st.markdown(f"""
     <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
+    #MainMenu {{visibility: hidden;}}
+    footer {{visibility: hidden;}}
+    header {{visibility: hidden;}}
     
-    .stApp {
+    .stApp {{
         background-color: #FBFBF9;
         color: #1E293B;
-        direction: rtl;
-        text-align: right;
+        direction: {direction};
+        text-align: {text_align};
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     
-    div:empty, .element-container:empty {
+    div:empty, .element-container:empty {{
         width: 0px !important;
         height: 0px !important;
         margin: 0px !important;
@@ -47,7 +59,7 @@ st.markdown("""
     }
     
     /* البطاقة المركزية الكبرى */
-    .main-container-card {
+    .main-container-card {{
         background: #FFFFFF;
         border: 1px solid rgba(226, 232, 240, 0.9);
         border-radius: 16px;
@@ -55,15 +67,15 @@ st.markdown("""
         box-shadow: 0 12px 35px rgba(14, 36, 58, 0.05);
         margin-top: 1rem;
         margin-bottom: 2rem;
-        direction: rtl;
-        text-align: right;
+        direction: {direction};
+        text-align: {text_align};
         max-width: 900px;
         margin-left: auto;
         margin-right: auto;
     }
     
     /* صندوق العنوان والشرح المنفصل */
-    .title-desc-box {
+    .title-desc-box {{
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
         border-radius: 12px;
@@ -71,23 +83,23 @@ st.markdown("""
         margin-bottom: 20px;
         box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
         text-align: center;
-    }
+    }}
 
-    .platform-title {
+    .platform-title {{
         font-size: 1.8rem;
         font-weight: 800;
         color: #0E243A;
         margin-bottom: 12px;
-    }
+    }}
     
-    .platform-desc {
+    .platform-desc {{
         font-size: 0.98rem;
         color: #475569;
         line-height: 1.7;
-    }
+    }}
     
-    /* صندوق سدايا الأمني المحدث بالصياغة الجديدة والكحلي السيادي */
-    .sdaia-box-okular {
+    /* صندوق سدايا الأمني */
+    .sdaia-box-okular {{
         background: #F8FAFC;
         border: 1px solid #CBD5E1;
         color: #0E243A;
@@ -99,9 +111,10 @@ st.markdown("""
         line-height: 1.6;
         font-weight: 600;
         box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
-    }
+        direction: {direction};
+    }}
     
-    .stButton button {
+    .stButton button {{
         width: 100%;
         background-color: #0E243A;
         color: #FFFFFF;
@@ -111,21 +124,58 @@ st.markdown("""
         border: none;
         box-shadow: 0 4px 12px rgba(14, 36, 58, 0.25);
         height: 48px;
-    }
-    .stButton button:hover {
+    }}
+    .stButton button:hover {{
         background-color: #17324D;
-    }
+    }}
     
-    .sovereign-footer {
+    .sovereign-footer {{
         text-align: center;
         color: #64748b;
         font-size: 0.85rem;
         margin-top: 3rem;
         margin-bottom: 2rem;
         letter-spacing: 0.3px;
-    }
+    }}
     </style>
 """, unsafe_allow_html=True)
+
+# 3. القواميس ثنائية اللغة
+translations = {
+    'ar': {
+        'title': "منصة الاستشارات التنفيذية",
+        'desc': "أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف قيمة الوثيقة عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.",
+        'security': "🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات مرفوعة ويتم التخلص نهائياً من البيانات بعد مرور 24 ساعة.",
+        'upload': "اسحب ملفات البيانات هنا أو اضغط للاختيار (CSV / XLSX)",
+        'launch': "تشغيل اللوحة التنفيذية",
+        'processing': "جاري معالجة الملفات وضخها إلى المستودع المركزي...",
+        'success': "تم رفع بيانات المطالبات الشهرية بنجاح لـ BigQuery برقم الجلسة: ",
+        'ready': "📈 تقرير لوحة المؤشرات جاهز:",
+        'link': "اضغط هنا لفتح لوحة البيانات في Looker Studio",
+        'footer': "© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية."
+    },
+    'en': {
+        'title': "Executive Advisory Platform",
+        'desc': "Advanced strategic analysis tool for C-Level executives and boards of directors, enabling financial performance reading, cost inflation analysis, and policy value forecasting through live scenario simulation.",
+        'security': "🛡️ 100% Fully Secure - Complying with SDAIA regulations and the Personal Data Protection Law (PDPL): No uploaded files are stored, and data is permanently purged after 24 hours.",
+        'upload': "Drag and drop data files here or click to browse (CSV / XLSX)",
+        'launch': "Launch Executive Dashboard",
+        'processing': "Processing files and loading to the central data warehouse...",
+        'success': "Monthly claims data successfully uploaded to BigQuery with Session ID: ",
+        'ready': "📈 Executive Dashboard Report Ready:",
+        'link': "Click here to open the dashboard in Looker Studio",
+        'footer': "© 2026 Fahd Aljarallah - All rights reserved for the Sovereign Workspace."
+    }
+}
+
+t = translations[st.session_state.lang]
+
+# 4. ترويسة اللغة التفاعلية الحقيقية
+col_lang1, col_lang2, col_lang3 = st.columns([8, 1, 1])
+with col_lang2:
+    if st.button("English" if is_ar else "العربية"):
+        set_lang('en' if is_ar else 'ar')
+        st.rerun()
 
 PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
@@ -174,32 +224,6 @@ def extract_structured_rows_from_pdf_bytes(file_bytes):
                     all_structured_rows.extend(rows)
     except Exception:
         pass
-
-    if not all_structured_rows:
-        try:
-            images = pdf2image.convert_from_bytes(file_bytes)
-            for img in images:
-                data = pytesseract.image_to_data(img, output_type=Output.DICT, lang='eng+ara')
-                words = [{'left': data['left'][i], 'top': data['top'][i], 'width': data['width'][i], 'height': data['height'][i], 'text': data['text'][i].strip()} for i in range(len(data['text'])) if data['text'][i].strip()]
-                words = sorted(words, key=lambda w: (w['top'], w['left']))
-                rows, current_row, current_top, tolerance = [], [], -1, 12
-                for w in words:
-                    if current_top == -1 or abs(w['top'] - current_top) <= tolerance:
-                        current_row.append(w)
-                        if current_top == -1:
-                            current_top = w['top']
-                    else:
-                        current_row = sorted(current_row, key=lambda x: x['left'])
-                        rows.append(current_row)
-                        current_row = [w]
-                        current_top = w['top']
-                if current_row:
-                    current_row = sorted(current_row, key=lambda x: x['left'])
-                    rows.append(current_row)
-                all_structured_rows.extend(rows)
-        except Exception as e:
-            st.error(f"خطأ في معالجة ملف الـ PDF: {str(e)}")
-            
     return all_structured_rows
 
 def parse_single_file(file_bytes, file_name, session_id):
@@ -231,138 +255,9 @@ def parse_single_file(file_bytes, file_name, session_id):
             return pd.DataFrame(monthly_rows)
         except Exception:
             pass
+    return pd.DataFrame()
 
-    monthly_rows = []
-    all_structured_rows = extract_structured_rows_from_pdf_bytes(file_bytes)
-    if not all_structured_rows:
-        return pd.DataFrame()
-
-    current_policy_year = ""
-    current_inception = ""
-    current_class_tier = "CLASS VIP"
-    seen_months = set()
-    
-    for row in all_structured_rows:
-        row_tokens = [w['text'] for w in row]
-        row_text = " ".join(row_tokens)
-        line_lower = row_text.lower()
-        
-        if "confidential" in line_lower:
-            continue
-            
-        if "policy year" in line_lower or "last policy year" in line_lower or "سنة الوثيقة" in line_lower or "period" in line_lower:
-            current_policy_year = row_text.strip()
-            continue
-            
-        if "inception" in line_lower:
-            date_m = re.search(r'\b(0?[1-9]|[12][0-9]|3[01])[-/](0?[1-9]|1[0-2])[-/](20\d{2})\b', row_text)
-            if date_m:
-                current_inception = date_m.group(0)
-            continue
-            
-        if "class" in line_lower or "tier" in line_lower or "الفئة" in line_lower or "product" in line_lower:
-            clean_class = re.sub(r'(class\s*type|class\s*tier|product\s*/\s*class|الفئة[:\s]*)', '', row_text, flags=re.IGNORECASE).strip()
-            if not clean_class and ":" in row_text:
-                clean_class = row_text.split(":")[-1].strip()
-            clean_class = re.split(r'\b(dental|inpatient|outpatient|optical|maternity|limit|deductible)\b', clean_class, flags=re.IGNORECASE)[0].strip()
-            if clean_class and "confidential" not in clean_class.lower():
-                clean_class = re.sub(r'[.:\-]$', '', clean_class).strip()
-                if clean_class and len(clean_class) < 20 and not re.search(r'[\u0600-\u06FF]', clean_class):
-                    current_class_tier = clean_class
-            continue
-
-        created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
-        
-        if "number of lives at start" in line_lower or "lives at start" in line_lower:
-            nums_lives = [clean_number(t) for t in row_tokens if re.search(r'\d', t)]
-            lives_val = int(nums_lives[0]) if nums_lives else 100
-            monthly_rows.append({
-                "session_id": session_id,
-                "created_at": created_at_ts,
-                "policy_year": current_policy_year or "LAST POLICY YEAR",
-                "inception_date": current_inception or "",
-                "table_header": file_name,
-                "class_tier": current_class_tier,
-                "section_type": "Monthly Claims",
-                "month_code": "Number of lives at start",
-                "active_lives": lives_val,
-                "claims_count": 0,
-                "paid_claims_sar": 0.0,
-                "paid_claims_vat_sar": 0.0,
-                "OS_claims_count": 0,
-                "OS_paid_claims_sar": 0.0,
-                "OS_paid_claims_vat_sar": 0.0,
-                "benefit_name": None,
-                "provider_name": None
-            })
-            continue
-
-        date_match = re.search(r'\b(20\d{2})(0[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-](20\d{2})\b|\b(20\d{2})[\/\-](0?[1-9]|1[0-2])\b', line_lower)
-        is_tawuniya_format = bool(row_tokens and re.match(r'^(0?[1-9]|1[0-2])[\/\-](20\d{2})$', row_tokens[0]))
-
-        if date_match or is_tawuniya_format:
-            if is_tawuniya_format:
-                parts = row_tokens[0].replace('-', '/').split('/')
-                row_date = f"{int(parts[1])}-{str(int(parts[0])).zfill(2)}"
-            elif date_match:
-                if date_match.group(1) and date_match.group(2):
-                    row_date = f"{date_match.group(1)}-{str(int(date_match.group(2))).zfill(2)}"
-                elif date_match.group(3) and date_match.group(4):
-                    row_date = f"{date_match.group(4)}-{str(int(date_match.group(3))).zfill(2)}"
-                elif date_match.group(5) and date_match.group(6):
-                    row_date = f"{date_match.group(5)}-{str(int(date_match.group(6))).zfill(2)}"
-                else:
-                    row_date = row_text[:15].strip()
-            else:
-                row_date = row_text[:15].strip()
-            
-            month_key = (file_name, current_class_tier, row_date)
-            if month_key in seen_months:
-                continue
-            seen_months.add(month_key)
-            
-            filtered_tokens = []
-            for idx, t in enumerate(row_tokens):
-                if idx == 0 and (t in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'] or '/' in t or '-' in t):
-                    continue
-                if re.search(r'\b20\d{2}(0[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[\/\-]20\d{2}\b|\b20\d{2}[\/\-](0?[1-9]|1[0-2])\b', t):
-                    continue
-                filtered_tokens.append(t)
-            
-            nums = [clean_number(t) for t in filtered_tokens if re.search(r'\d', t)]
-            
-            if nums:
-                monthly_rows.append({
-                    "session_id": session_id,
-                    "created_at": created_at_ts,
-                    "policy_year": current_policy_year or "LAST POLICY YEAR",
-                    "inception_date": current_inception or "",
-                    "table_header": file_name,
-                    "class_tier": current_class_tier,
-                    "section_type": "Monthly Claims",
-                    "month_code": row_date,
-                    "active_lives": int(nums[0]) if len(nums) > 0 else 100,
-                    "claims_count": int(nums[1]) if len(nums) > 1 else 0,
-                    "paid_claims_sar": float(nums[2]) if len(nums) > 2 else 0.0,
-                    "paid_claims_vat_sar": float(nums[3]) if len(nums) > 3 else 0.0,
-                    "OS_claims_count": int(nums[4]) if len(nums) > 4 else 0,
-                    "OS_paid_claims_sar": float(nums[5]) if len(nums) > 5 else 0.0,
-                    "OS_paid_claims_vat_sar": float(nums[6]) if len(nums) > 6 else 0.0,
-                    "benefit_name": None,
-                    "provider_name": None
-                })
-
-    return pd.DataFrame(monthly_rows)
-
-# 1. ترويسة اللغة
-st.markdown("""
-    <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 1.5rem; padding-top: 1rem;">
-        <span style="border: 1.5px solid #0E243A; background-color: transparent; color: #0E243A; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;">English</span>
-        <span style="border: 1.5px solid #0E243A; background-color: #0E243A; color: #FFFFFF; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;">العربية</span>
-    </div>
-""", unsafe_allow_html=True)
-
-# 2. الشعار الرسمي في المنتصف تماماً
+# 5. الشعار الرسمي في المنتصف
 col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
 with col_logo_center:
     try:
@@ -377,53 +272,50 @@ with col_logo_center:
     except Exception:
         st.markdown("""
             <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center; color: #0E243A; font-weight: 700;">
-                FAHD ALJARALLAH LOGO
+                FAHD ALJARALLAH
             </div>
         """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3. فتح البطاقة المركزية الكبرى
+# 6. فتح البطاقة المركزية الكبرى
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
-# صندوق العنوان والشرح المنفصل (بالصياغة الجديدة المحدثة)
-st.markdown("""
+# العنوان والشرح المترجم
+st.markdown(f"""
     <div class="title-desc-box">
-        <div class="platform-title">منصة الاستشارات التنفيذية</div>
-        <div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف قيمة الوثيقة عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>
+        <div class="platform-title">{t['title']}</div>
+        <div class="platform-desc">{t['desc']}</div>
     </div>
 """, unsafe_allow_html=True)
 
-# صندوق سدايا الأمني المحدث بالصياغة الجديدة واللون الكحلي السيادي
-st.markdown('<div class="sdaia-box-okular">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات مرفوعة ويتم التخلص نهائياً من البيانات بعد مرور 24 ساعة.</div>', unsafe_allow_html=True)
+# صندوق سدايا الأمني المترجم
+st.markdown(f'<div class="sdaia-box-okular">{t["security"]}</div>', unsafe_allow_html=True)
 
-# منطقة رفع الملفات وزر التشغيل التنفيذي متجاوران داخل البطاقة
+# منطقة رفع الملفات وزر التشغيل التنفيذي
 col_upload, col_btn = st.columns([1.3, 1])
 
 with col_upload:
     uploaded_files = st.file_uploader(
-        "اسحب ملفات البيانات هنا أو اضغط للاختيار (CSV / XLSX)",
+        t['upload'],
         type=["pdf", "csv", "xlsx"],
         accept_multiple_files=True
     )
 
 with col_btn:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    launch_button = st.button("تشغيل اللوحة التنفيذية", type="primary")
+    launch_button = st.button(t['launch'], type="primary")
 
-# إغلاق البطاقة البيضاء الكبرى
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 4. حاوية النتائج والفوتر
 result_container = st.container()
 
-# 5. معالجة البيانات والاتصال بـ BigQuery
+# 7. المعالجة والاتصال بـ BigQuery
 if uploaded_files and launch_button:
     with result_container:
         current_sess = f"sess_{str(uuid.uuid4())[:8]}"
-        st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
         
-        with st.spinner("جاري معالجة الملفات وضخها إلى المستودع المركزي..."):
+        with st.spinner(t['processing']):
             all_dfs = []
             for uploaded_file in uploaded_files:
                 file_bytes = uploaded_file.read()
@@ -436,38 +328,28 @@ if uploaded_files and launch_button:
                 try:
                     df_clean = df_actual.where(pd.notnull(df_actual), None)
                     records_to_insert = df_clean.to_dict(orient="records")
-                    for r in records_to_insert:
-                        for k, v in r.items():
-                            if pd.isna(v):
-                                r[k] = None
-
                     bq_client = get_bq_client(PROJECT_ID)
                     table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
                     errors = bq_client.insert_rows_json(table_ref, records_to_insert)
                     
                     if errors == []:
-                        st.success(f"تم رفع بيانات المطالبات الشهرية بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
                         base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
                         params_data = {"ds14": {"p_client_session": current_sess}}
                         encoded_params = urllib.parse.quote(json.dumps(params_data))
                         looker_url = f"{base_url}/page/p_yr47xbgg7d?params={encoded_params}"
                         
-                        # صندوق النتائج ورابط Looker Studio مهيكل بشكل نظيف ومحاذاة لليمين
                         st.markdown(f"""
-                            <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 24px; margin-top: 20px; text-align: right; direction: rtl; box-shadow: 0 1px 4px rgba(0,0,0,0.02); max-width: 900px; margin-left: auto; margin-right: auto;">
-                                <h3 style="color: #0E243A; font-size: 1.2rem; font-weight: 700; margin-bottom: 12px;">📈 تقرير لوحة المؤشرات جاهز:</h3>
-                                <p style="margin-bottom: 0;"><a href="{looker_url}" target="_blank" style="color: #0E243A; font-weight: 700; text-decoration: underline;">اضغط هنا لفتح لوحة البيانات في Looker Studio</a></p>
+                            <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 24px; margin-top: 20px; text-align: {text_align}; direction: {direction}; box-shadow: 0 1px 4px rgba(0,0,0,0.02); max-width: 900px; margin-left: auto; margin-right: auto;">
+                                <h3 style="color: #0E243A; font-size: 1.2rem; font-weight: 700; margin-bottom: 12px;">{t['ready']}</h3>
+                                <p style="margin-bottom: 0;"><a href="{looker_url}" target="_blank" style="color: #0E243A; font-weight: 700; text-decoration: underline;">{t['link']}</a></p>
                             </div>
                         """, unsafe_allow_html=True)
                     else:
-                        st.error(f"خطأ في الحفظ في BigQuery: {errors}")
+                        st.error(f"Error: {errors}")
                 except Exception as e:
-                    st.error(f"فشل الاتصال بقاعدة البيانات: {str(e)}")
+                    st.error(f"Connection Failed: {str(e)}")
             else:
-                st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة.")
+                st.warning("No matching data extracted from uploaded files.")
 
-# 6. الفوتر السيادي السفلي (مستقر تماماً في الأسفل)
-st.markdown(
-    '<p class="sovereign-footer">© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية.</p>',
-    unsafe_allow_html=True
-)
+# 8. الفوتر السيادي
+st.markdown(f'<p class="sovereign-footer">{t["footer"]}</p>', unsafe_allow_html=True)
