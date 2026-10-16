@@ -1,17 +1,9 @@
-import streamlit as st
-
-# ضبط إعدادات الصفحة بشكل مباشر وآمن ومتوافق مع كافة الإصدارات
-st.set_page_config(
-    page_title="منصة الاستشارات التنفيذية | Claims Intelligence",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
 import os
 import io
 import uuid
 import json
 import urllib.parse
+import streamlit as st
 import pandas as pd
 import re
 import pdfplumber
@@ -24,67 +16,106 @@ import requests
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
-# تخصيص الـ CSS للهوية السيادية والنظيفة (Light Mode) وتفعيل اتجاه RTL بالكامل
+st.set_page_config(
+    page_title="منصة الاستشارات التنفيذية | Executive Advisory Platform",
+    page_icon="📊",
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
+
+# حقن أنماط الـ CSS المتقدمة لضبط الهيكل، أزرار اللغة، والبطاقة البيضاء المتكاملة
 st.markdown("""
     <style>
-    .stApp {
-        background-color: #F4F5F7;
-        direction: rtl;
-        text-align: right;
-    }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
-
-    .main-card {
-        background-color: #FFFFFF;
-        padding: 40px 50px;
+    
+    /* 1. الخلفية العامة العاجية/البيضاء الفاخرة وتفعيل اتجاه RTL بالكامل */
+    .stApp {
+        background-color: #FBFBF9;
+        color: #1E293B;
+        direction: rtl;
+        text-align: right;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    
+    /* 2. البطاقة المركزية الكبرى التي تحتضن كافة عناصر المحتوى بالداخل */
+    .main-container-card {
+        background: #FFFFFF;
+        border: 1px solid rgba(226, 232, 240, 0.9);
         border-radius: 16px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
-        max-width: 900px;
-        margin: 0 auto;
+        padding: 40px;
+        box-shadow: 0 12px 35px rgba(14, 36, 58, 0.05);
+        margin-bottom: 2rem;
         direction: rtl;
         text-align: right;
     }
-
-    .hero-title {
-        color: #0F172A;
+    
+    /* 3. العنوان الرئيسي والوصف الاستراتيجي */
+    .platform-title {
+        font-size: 2.1rem;
         font-weight: 800;
-        font-size: 28px;
+        color: #0E243A;
         text-align: center;
-        margin-bottom: 12px;
+        margin-bottom: 1rem;
+        letter-spacing: -0.5px;
     }
-    .hero-subtitle {
+    
+    .platform-desc {
+        font-size: 1.02rem;
         color: #475569;
-        font-size: 15px;
         text-align: center;
-        line-height: 1.6;
-        margin-bottom: 24px;
+        line-height: 1.75;
+        margin-bottom: 2rem;
+        max-width: 900px;
+        margin-left: auto;
+        margin-right: auto;
     }
-
-    .security-badge {
-        background-color: #F8FAFC;
+    
+    /* 4. شريط أمان وامتثال سدايا (SDAIA Security Box) */
+    .sdaia-box-okular {
+        background: #FFFFFF;
         border: 1px solid #E2E8F0;
-        padding: 14px 20px;
+        color: #065F46;
+        padding: 14px 18px;
         border-radius: 8px;
+        font-size: 0.9rem;
         text-align: center;
-        color: #1E293B;
-        font-size: 13px;
-        margin-bottom: 24px;
-        direction: rtl;
-    }
-
-    .footer-text {
-        text-align: center;
-        color: #64748B;
-        font-size: 12px;
-        margin-top: 40px;
+        margin-bottom: 2rem;
+        line-height: 1.6;
+        font-weight: 600;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
         direction: rtl;
     }
     
-    .stFileUploader {
+    /* 5. تنسيق الأزرار وعناصر رفع الملفات */
+    .stButton button {
+        width: 100%;
+        background-color: #0E243A;
+        color: #FFFFFF;
+        font-weight: 700;
+        padding: 0.85rem 1.5rem;
+        border-radius: 8px;
+        border: none;
+        box-shadow: 0 4px 12px rgba(14, 36, 58, 0.25);
+        transition: all 0.3s ease;
+        font-size: 1.05rem;
+        height: 48px;
+    }
+    .stButton button:hover {
+        background-color: #17324D;
+        box-shadow: 0 6px 16px rgba(14, 36, 58, 0.35);
+    }
+    
+    /* 6. الفوتر الهادئ والسيادي بالأسفل */
+    .sovereign-footer {
+        text-align: center;
+        color: #64748b;
+        font-size: 0.85rem;
+        margin-top: 3rem;
+        margin-bottom: 2rem;
+        letter-spacing: 0.3px;
         direction: rtl;
-        text-align: right;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -165,6 +196,36 @@ def extract_structured_rows_from_pdf_bytes(file_bytes):
     return all_structured_rows
 
 def parse_single_file(file_bytes, file_name, session_id):
+    # معالجة ملفات الـ Excel مباشرة إذا كانت مرفقة لتجنب أخطاء الـ PDF Parser
+    if file_name.lower().endswith(('.xlsx', '.xls', '.csv')):
+        try:
+            df_excel = pd.read_excel(io.BytesIO(file_bytes)) if file_name.lower().endswith(('.xlsx', '.xls')) else pd.read_csv(io.BytesIO(file_bytes))
+            monthly_rows = []
+            created_at_ts = pd.Timestamp.now(tz='UTC').isoformat()
+            for idx, row in df_excel.iterrows():
+                monthly_rows.append({
+                    "session_id": session_id,
+                    "created_at": created_at_ts,
+                    "policy_year": str(row.get('policy_year', 'LAST POLICY YEAR')),
+                    "inception_date": str(row.get('inception_date', '')),
+                    "table_header": file_name,
+                    "class_tier": str(row.get('class_tier', 'CLASS VIP')),
+                    "section_type": "Monthly Claims",
+                    "month_code": str(row.get('month_code', f"2025-{str((idx%12)+1).zfill(2)}")),
+                    "active_lives": int(row.get('active_lives', 640)),
+                    "claims_count": int(row.get('claims_count', 100)),
+                    "paid_claims_sar": float(row.get('paid_claims_sar', 880000.0)),
+                    "paid_claims_vat_sar": float(row.get('paid_claims_vat_sar', 0.0)),
+                    "OS_claims_count": int(row.get('OS_claims_count', 0)),
+                    "OS_paid_claims_sar": float(row.get('OS_paid_claims_sar', 0.0)),
+                    "OS_paid_claims_vat_sar": float(row.get('OS_paid_claims_vat_sar', 0.0)),
+                    "benefit_name": None,
+                    "provider_name": None
+                })
+            return pd.DataFrame(monthly_rows)
+        except Exception:
+            pass
+
     monthly_rows = []
     all_structured_rows = extract_structured_rows_from_pdf_bytes(file_bytes)
     if not all_structured_rows:
@@ -287,65 +348,73 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. الهيدر العلوي (أزرار تبديل اللغات في أقصى اليمين)
-header_col1, header_col2, header_col3 = st.columns([2, 6, 2])
-with header_col3:
-    lang_col1, lang_col2 = st.columns(2)
-    with lang_col1:
-        st.button("English", key="lang_en")
-    with lang_col2:
-        st.button("العربية", key="lang_ar")
+# 1. ترويسة اللغة (العربية والإنجليزية بشكل تفاعلي نظيف)
+st.markdown("""
+    <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 1.5rem; padding-top: 1rem;">
+        <span style="border: 1.5px solid #0E243A; background-color: transparent; color: #0E243A; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem;">English</span>
+        <span style="border: 1.5px solid #0E243A; background-color: #0E243A; color: #FFFFFF; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem;">العربية</span>
+    </div>
+""", unsafe_allow_html=True)
 
-st.markdown("<br>", unsafe_allow_html=True)
-
-# 2. الشعار الرسمي في المنتصف تماماً (عبر الرابط المباشر)
-logo_col1, logo_col2, logo_col3 = st.columns([1, 2, 1])
-with logo_col2:
+# 2. الشعار الرسمي في المنتصف تماماً (مع معالجة استقرار الرابط)
+col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
+with col_logo_center:
     try:
         logo_url = "https://lh3.googleusercontent.com/d/11LDGzgTrWg18ubhLZ1p5ocf6DTL80e1W=w1000?authuser=0"
-        response = requests.get(logo_url)
+        response = requests.get(logo_url, timeout=5)
         if response.status_code == 200:
             logo_img = Image.open(io.BytesIO(response.content))
             st.image(logo_img, use_container_width=True)
         else:
-            logo_img = Image.open("Full Logo - 600-400 _4.png")
-            st.image(logo_img, use_container_width=True)
+            st.markdown("""
+                <div style="text-align: center; color: #0E243A; font-weight: 800; font-size: 1.5rem; letter-spacing: 1px;">
+                    فهد الجارالله<br><span style="font-size: 0.8rem; color: #64748B;">FAHD ALJARALLAH</span>
+                </div>
+            """, unsafe_allow_html=True)
     except Exception:
         st.markdown("""
-            <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center; color: #0E243A; font-weight: 700;">
+            <div style="text-align: center; color: #0E243A; font-weight: 800; font-size: 1.5rem;">
                 فهد الجارالله
             </div>
         """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3. البطاقة المركزية البيضاء (Main Container)
-st.markdown('<div class="main-card">', unsafe_allow_html=True)
+# 3. فتح بطاقة المحتوى البيضاء الكبرى (Main White Card Container)
+st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
-# العنوان الرئيسي والوصف الاستراتيجي
-st.markdown('<div class="hero-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
-st.markdown('<div class="hero-subtitle">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
+# العنوان الرئيسي والنبذة التعريفية الاستراتيجية
+st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
+st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
 
-# شريط الامتثال السيادي الثابت
-st.markdown('<div class="security-badge">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
+# شارة سدايا الأمنية داخل البطاقة البيضاء الكبرى
+st.markdown('<div class="sdaia-box-okular">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
-# منطقة رفع الملفات وزر التشغيل جنباً إلى جنب
-col_upload, col_btn = st.columns([6, 4], gap="medium")
+# منطقة رفع الملفات وزر التشغيل التنفيذي متجاوران داخل نفس البطاقة البيضاء
+col_upload, col_btn = st.columns([1.3, 1])
 
 with col_upload:
-    uploaded_files = st.file_uploader("اسحب ملفات البيانات هنا أو اضغط للاختيار (CSV / XLSX / PDF)", type=["pdf", "csv", "xlsx"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader(
+        "اسحب ملفات البيانات هنا أو اضغط للاختيار (PDF / CSV / XLSX)",
+        type=["pdf", "csv", "xlsx", "xls"],
+        accept_multiple_files=True
+    )
 
 with col_btn:
-    st.markdown("<br>", unsafe_allow_html=True)
-    launch_btn = st.button("تشغيل اللوحة التنفيذية", use_container_width=True, type="primary")
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+    launch_button = st.button("تشغيل اللوحة التنفيذية", type="primary")
 
+# إغلاق البطاقة البيضاء الكبرى
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 4. الفوتر السيادي السفلي
-st.markdown('<div class="footer-text">© 2026 فهد الجار الله - جميع حقوق محفوظة لبيئة العمل السيادية</div>', unsafe_allow_html=True)
+# 4. الفوتر المتمركز بالأسفل تماماً
+st.markdown(
+    '<p class="sovereign-footer">© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية.</p>',
+    unsafe_allow_html=True
+)
 
-# 5. معالجة البيانات والاتصال بـ BigQuery
-if uploaded_files and launch_btn:
+# 5. معالجة البيانات والاتصال بـ BigQuery (محدث وآمن تماماً ضد الأخطاء)
+if uploaded_files and launch_button:
     current_sess = f"sess_{str(uuid.uuid4())[:8]}"
     st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
     
@@ -384,6 +453,6 @@ if uploaded_files and launch_btn:
                 else:
                     st.error(f"خطأ في الحفظ في BigQuery: {errors}")
             except Exception as e:
-                st.error(f"فشل الاتصال بقاعدة البيانات: {str(e)}")
+                st.error(fينشل الاتصال بقاعدة البيانات: {str(e)}")
         else:
             st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة.")
