@@ -22,7 +22,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط CSS دقيقة تطابق التصميم السينمائي الفاخر للملف المرفق
+# حقن أنماط الـ CSS المتقدمة (خلفية كحلية سيادية عميقة + تأثيرات Glassmorphism ودعم اتجاه RTL)
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -30,34 +30,58 @@ st.markdown("""
     header {visibility: hidden;}
     
     .stApp {
-        background: radial-gradient(circle at 50% 20%, #111827 0%, #030712 100%);
+        background: radial-gradient(circle at 50% 20%, #17324D 0%, #0E243A 100%);
         color: #f3f4f6;
         direction: rtl;
         text-align: right;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     
-    /* أزرار اللغات في الأعلى */
-    .lang-container {
+    /* صف تغيير اللغة في الأعلى */
+    .lang-row {
         display: flex;
         justify-content: flex-end;
-        gap: 10px;
-        margin-bottom: 2rem;
+        gap: 15px;
+        margin-bottom: 1.5rem;
     }
     
-    /* البطاقة السينمائية الرئيسية */
-    .cinematic-card {
-        background: rgba(17, 24, 39, 0.85);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+    /* حاوية الشعار الرسمي (600x400 سيادي) */
+    .sovereign-logo-container {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 2rem;
+    }
+    .sovereign-logo-box {
+        width: 300px;
+        height: 200px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 2px dashed rgba(255, 255, 255, 0.15);
+        border-radius: 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        color: #94a3b8;
+        font-weight: 600;
+        letter-spacing: 1px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    }
+    
+    /* صندوق المحتوى الرئيسي (Glass Card) */
+    .glass-card {
+        background: rgba(14, 36, 58, 0.75);
+        border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 16px;
         padding: 40px;
-        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+        box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
         backdrop-filter: blur(16px);
         margin-bottom: 2rem;
     }
     
     .platform-title {
-        font-size: 2.2rem;
+        font-size: 2.3rem;
         font-weight: 800;
         color: #ffffff;
         text-align: right;
@@ -66,23 +90,25 @@ st.markdown("""
     }
     
     .platform-desc {
-        font-size: 1.02rem;
-        color: #9ca3af;
+        font-size: 1.05rem;
+        color: #94a3b8;
         text-align: right;
-        line-height: 1.7;
+        line-height: 1.75;
         margin-bottom: 2rem;
     }
     
+    /* شارة سدايا النخبوية */
     .sdaia-badge {
-        background: rgba(16, 185, 129, 0.08);
-        border: 1px solid rgba(16, 185, 129, 0.2);
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.25);
         color: #34d399;
         padding: 14px 18px;
         border-radius: 10px;
-        font-size: 0.9rem;
+        font-size: 0.92rem;
         text-align: right;
         margin-bottom: 2rem;
-        line-height: 1.5;
+        line-height: 1.6;
+        font-weight: 500;
     }
     
     /* تنسيق صندوق رفع الملفات */
@@ -91,29 +117,32 @@ st.markdown("""
         text-align: right;
     }
     
-    /* زر التشغيل التنفيذي */
+    /* زر التشغيل التنفيذي السيادي */
     .stButton button {
         width: 100%;
-        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-        color: white;
+        background: linear-gradient(135deg, #1e3a8a 0%, #172554 100%);
+        color: #ffffff;
         font-weight: 700;
-        padding: 0.85rem 1.5rem;
+        padding: 0.9rem 1.5rem;
         border-radius: 10px;
-        border: none;
-        box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        box-shadow: 0 6px 20px rgba(14, 36, 58, 0.6);
         transition: all 0.3s ease;
-        font-size: 1.05rem;
+        font-size: 1.1rem;
     }
     .stButton button:hover {
-        background: linear-gradient(135deg, #1d4ed8 100%, #1e40af 100%);
-        box-shadow: 0 6px 20px rgba(37, 99, 235, 0.6);
+        background: linear-gradient(135deg, #1d4ed8 100%, #1e3a8a 100%);
+        box-shadow: 0 8px 25px rgba(29, 78, 216, 0.5);
+        border-color: rgba(59, 130, 246, 0.6);
     }
     
-    .footer-text {
+    /* الفوتر */
+    .sovereign-footer {
         text-align: center;
-        color: #6b7280;
-        font-size: 0.85rem;
+        color: #64748b;
+        font-size: 0.88rem;
         margin-top: 3rem;
+        letter-spacing: 0.5px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -316,22 +345,33 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. شريط أزرار اللغة العلوي (العربية / English)
+# 1. صف تغيير اللغة: (العربية / English) في أعلى الواجهة
 col_space, col_ar, col_en = st.columns([6, 1, 1])
 with col_ar:
     st.button("العربية", key="lang_ar")
 with col_en:
     st.button("English", key="lang_en")
 
-# 2. حاوية البطاقة السينمائية المطابقة تماماً للملف المرفق
-st.markdown('<div class="cinematic-card">', unsafe_allow_html=True)
+# 2. الشعار الرسمي لفهد الجارالله ($600\times400$) في المنتصف تماماً
+st.markdown("""
+    <div class="sovereign-logo-container">
+        <div class="sovereign-logo-box">
+            <span>FAHD ALJARALLAH</span>
+            <span style="font-size: 0.75rem; color: #64748b; margin-top: 4px;">600 × 400 Logo</span>
+        </div>
+    </div>
+""", unsafe_allow_html=True)
+
+# 3. صندوق المحتوى الرئيسي (Glass Card)
+st.markdown('<div class="glass-card">', unsafe_allow_html=True)
 
 st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
 st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="sdaia-badge">🔒 آمن بالكامل %100 - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
+# شارة سدايا النخبوية النصية الحرفية
+st.markdown('<div class="sdaia-badge">🔒 آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية : لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
-# عنصر رفع الملفات
+# منطقة رفع الملفات (CSV / XLSX / PDF)
 uploaded_files = st.file_uploader(
     "اسحب ملفات البيانات هنا أو اضغط للاختيار (CSV / XLSX / PDF)",
     type=["pdf", "csv", "xlsx"],
@@ -345,13 +385,13 @@ launch_button = st.button("تشغيل اللوحة التنفيذية", type="pr
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 3. التذييل (Footer) السيادي
+# 4. الفوتر السيادي في الأسفل تماماً
 st.markdown(
-    '<p class="footer-text">2026 فهد الجار الله - جميع حقوق محفوظة لبيئة العمل السيادية</p>',
+    '<p class="sovereign-footer">2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية</p>',
     unsafe_allow_html=True
 )
 
-# 4. معالجة الملفات والاتصال بـ BigQuery (دون المساس بكود المعالجة الأساسي)
+# 5. معالجة البيانات والاتصال بـ BigQuery (دون المساس بكود البايثون الأساسي)
 if uploaded_files and launch_button:
     current_sess = f"sess_{str(uuid.uuid4())[:8]}"
     st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
