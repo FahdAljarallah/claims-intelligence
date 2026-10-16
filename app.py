@@ -30,7 +30,7 @@ is_ar = st.session_state.lang == 'ar'
 text_align = "right" if is_ar else "left"
 direction = "rtl" if is_ar else "ltr"
 
-# حقن أنماط الـ CSS المتقدمة مع التحكم التام بألوان الأزرار النشطة وغير النشطة
+# حقن أنماط الـ CSS المتقدمة مع إجبار عناصر أزرار اللغة على إظهار النصوص بالألوان الصحيحة
 st.markdown(f"""
     <style>
     #MainMenu {{visibility: hidden;}}
@@ -53,7 +53,7 @@ st.markdown(f"""
         display: none !important;
     }}
     
-    /* تنسيق الأزرار الرئيسية في المنصة */
+    /* أزرار المنصة الرئيسية */
     .stButton button {{
         width: 100%;
         background-color: #0E243A;
@@ -69,21 +69,17 @@ st.markdown(f"""
         background-color: #17324D;
     }}
     
-    /* تخصيص دقيق لأزرار تبديل اللغة (المفعل كحلي/أبيض، وغير المفعل أبيض/كحلي) */
-    div[data-testid="column"] button[kind="secondary"] {{
-        background-color: #FFFFFF !important;
-        color: #0E243A !important;
-        border: 1.5px solid #0E243A !important;
+    /* تخصيص دقيق لترويسة أزرار اللغة لضمان ظهور النصوص بوضوح وتجنب المربعات السوداء */
+    div[data-testid="column"] .stButton button {{
+        height: 36px !important;
+        padding: 0px 12px !important;
+        font-size: 0.85rem !important;
         font-weight: 600 !important;
         border-radius: 6px !important;
-        height: 38px !important;
-        font-size: 0.85rem !important;
         box-shadow: none !important;
     }}
-    div[data-testid="column"] button[kind="secondary"]:hover {{
-        background-color: #F1F5F9 !important;
-        color: #0E243A !important;
-        border: 1.5px solid #0E243A !important;
+    div[data-testid="column"] .stButton button * {{
+        color: inherit !important;
     }}
 
     .main-container-card {{
@@ -177,12 +173,11 @@ translations = {
 
 t = translations[st.session_state.lang]
 
-# أزرار اللغة المتجاوران في أعلى الصفحة (English | العربية) بتنسيق دقيق واحترافي
+# أزرار اللغة المتجاوران في أعلى الصفحة بتنسيق دقيق واحترافي
 col_space, col_en, col_ar = st.columns([10, 0.9, 0.9])
 
 with col_en:
     is_en_active = (st.session_state.lang == 'en')
-    # الزر المفعل كحلي بكتابة بيضاء، وغير المفعل أبيض بكتابة وإطار كحلي
     en_bg = "#0E243A" if is_en_active else "#FFFFFF"
     en_color = "#FFFFFF" if is_en_active else "#0E243A"
     st.markdown(f"""
@@ -191,11 +186,9 @@ with col_en:
             background-color: {en_bg} !important;
             color: {en_color} !important;
             border: 1.5px solid #0E243A !important;
-            font-weight: 600 !important;
-            border-radius: 6px !important;
-            height: 36px !important;
-            font-size: 0.85rem !important;
-            box-shadow: none !important;
+        }}
+        div[data-testid="column"]:nth-of-type(2) button * {{
+            color: {en_color} !important;
         }}
         </style>
     """, unsafe_allow_html=True)
@@ -213,11 +206,9 @@ with col_ar:
             background-color: {ar_bg} !important;
             color: {ar_color} !important;
             border: 1.5px solid #0E243A !important;
-            font-weight: 600 !important;
-            border-radius: 6px !important;
-            height: 36px !important;
-            font-size: 0.85rem !important;
-            box-shadow: none !important;
+        }}
+        div[data-testid="column"]:nth-of-type(3) button * {{
+            color: {ar_color} !important;
         }}
         </style>
     """, unsafe_allow_html=True)
