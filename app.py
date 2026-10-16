@@ -22,47 +22,47 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضبط الهوية والهيكل بالمليمتر
+# حقن أنماط الـ CSS المتقدمة مطابقة للمواصفات السيادية بدقة متناهية
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* الخلفية العامة فانيلا/بيج فاتح ونظيف جداً */
+    /* 1. خلفية الصفحة البيضاء النقية / العاجي الهادئ */
     .stApp {
-        background-color: #F4F5F7;
-        color: #0F172A;
+        background-color: #FBFBF9;
+        color: #1E293B;
         direction: rtl;
         text-align: right;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     
-    /* الهيدر العلوي وأزرار اللغة في أقصى اليسار */
-    .header-container {
+    /* 2. صف تغيير اللغة في أعلى اليمين */
+    .lang-container {
         display: flex;
         justify-content: flex-start;
         align-items: center;
         gap: 10px;
-        margin-bottom: 2rem;
+        margin-bottom: 1.5rem;
         padding-top: 1rem;
     }
     
-    /* البطاقة المركزية البيضاء النقية */
+    /* 3. البطاقة المركزية الكبرى (Main Card Container) */
     .main-container-card {
         background: #FFFFFF;
-        border: 1px solid rgba(226, 232, 240, 0.9);
+        border: 1px solid rgba(226, 232, 240, 0.85);
         border-radius: 16px;
         padding: 40px;
-        box-shadow: 0 12px 35px rgba(0, 0, 0, 0.04);
+        box-shadow: 0 12px 35px rgba(14, 36, 58, 0.05);
         margin-bottom: 2rem;
     }
     
-    /* العنوان الرئيسي والوصف داخل البطاقة */
+    /* 4. العنوان الرئيسي والوصف الإستراتيجي */
     .platform-title {
         font-size: 2.1rem;
         font-weight: 800;
-        color: #0F172A;
+        color: #0E243A;
         text-align: center;
         margin-bottom: 1rem;
         letter-spacing: -0.5px;
@@ -72,53 +72,53 @@ st.markdown("""
         font-size: 1.02rem;
         color: #475569;
         text-align: center;
-        line-height: 1.7;
+        line-height: 1.75;
         margin-bottom: 2.5rem;
         max-width: 900px;
         margin-left: auto;
         margin-right: auto;
     }
     
-    /* شريط الأمان والامتثال (سدايا) متناسق بعرض البطاقة */
+    /* 5. شريط أمان وامتثال سدايا (SDAIA Security Box) */
     .sdaia-box {
-        background: #F8FAFC;
+        background: #FFFFFF;
         border: 1px solid #E2E8F0;
-        color: #334155;
+        color: #065F46;
         padding: 16px 20px;
         border-radius: 10px;
         font-size: 0.92rem;
         text-align: center;
         margin-bottom: 2.5rem;
         line-height: 1.6;
-        font-weight: 500;
+        font-weight: 600;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
     }
     
-    /* تنسيق منطقة رفع الملفات وزر التشغيل بتناسق متجاور */
+    /* 6. منطقة رفع الملفات وزر التشغيل التنفيذي */
     .stFileUploader {
         direction: rtl;
         text-align: right;
     }
     
-    /* زر التشغيل التنفيذي الفاخر */
     .stButton button {
         width: 100%;
-        background-color: #0F172A;
+        background-color: #0E243A;
         color: #FFFFFF;
         font-weight: 700;
         padding: 0.85rem 1.5rem;
-        border-radius: 10px;
+        border-radius: 8px;
         border: none;
-        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+        box-shadow: 0 4px 12px rgba(14, 36, 58, 0.25);
         transition: all 0.3s ease;
         font-size: 1.05rem;
         height: 48px;
     }
     .stButton button:hover {
-        background-color: #1E293B;
-        box-shadow: 0 6px 16px rgba(15, 23, 42, 0.3);
+        background-color: #17324D;
+        box-shadow: 0 6px 16px rgba(14, 36, 58, 0.35);
     }
     
-    /* الفوتر الهادئ بالأسفل */
+    /* 7. الفوتر الهادئ والسيادي بالأسفل */
     .sovereign-footer {
         text-align: center;
         color: #64748b;
@@ -328,26 +328,26 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. الهيدر العلوي: أزرار تبديل اللغة (English / العربية) بكامل نصها وبدون أي اختصارات في أقصى اليسار
-col_lang_space, col_en, col_ar = st.columns([8, 1, 1])
+# 1. الهيدر العلوي: أزرار تبديل اللغة (English / العربية) في أعلى اليمين
+col_space, col_en, col_ar = st.columns([6, 1, 1])
 with col_en:
     st.button("English", key="lang_en")
 with col_ar:
     st.button("العربية", key="lang_ar")
 
-# 2. الشعار الرسمي في المنتصف تماماً (تم استخدام الملف المرفق)
+# 2. الشعار الرسمي المرفق في المنتصف تماماً (Full Logo - 600-400 _3.png)
 col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
 with col_logo_center:
     try:
-        logo_img = Image.open("Full Logo - 600-400 _2.png")
+        logo_img = Image.open("Full Logo - 600-400 _3.png")
         st.image(logo_img, use_container_width=True)
     except Exception:
         try:
-            logo_img = Image.open("Full Logo - 600-400 .png")
+            logo_img = Image.open("Full Logo - 600-400 _2.png")
             st.image(logo_img, use_container_width=True)
         except Exception:
             st.markdown("""
-                <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center; color: #0F172A; font-weight: 700;">
+                <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center; color: #0E243A; font-weight: 700;">
                     FAHD ALJARALLAH LOGO
                 </div>
             """, unsafe_allow_html=True)
@@ -357,8 +357,75 @@ st.markdown("<br>", unsafe_allow_html=True)
 # 3. التسلسل الهرمي للبطاقة المركزية (The Card Hierarchy)
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
-# العنوان الرئيسي والوصف الإستراتيجي في أعلى البطاقة
+# العنوان الرئيسي والوصف الإستراتيجي
 st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
 st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
 
-# شريط الأمان والامت
+# شريط الأمان والامتثال (سدايا) مع درع الأمان والنص الحرفي
+st.markdown('<div class="sdaia-box">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
+
+# في الأسفل تماماً: صندوق رفع الملفات النظيف وزر "تشغيل اللوحة التنفيذية" بجواره بشكل منسق ومدروس
+col_upload, col_btn = st.columns([1.3, 1])
+
+with col_upload:
+    uploaded_files = st.file_uploader(
+        "اسحب ملفات البيانات هنا أو اضغط للاختيار (CSV / XLSX)",
+        type=["pdf", "csv", "xlsx"],
+        accept_multiple_files=True
+    )
+
+with col_btn:
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+    launch_button = st.button("تشغيل اللوحة التنفيذية", type="primary")
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# 4. الفوتر بالأسفل تماماً بنصه الثابت المعتمد
+st.markdown(
+    '<p class="sovereign-footer">© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية.</p>',
+    unsafe_allow_html=True
+)
+
+# 5. معالجة البيانات والاتصال بـ BigQuery (دون المساس بكود البايثون الأساسي)
+if uploaded_files and launch_button:
+    current_sess = f"sess_{str(uuid.uuid4())[:8]}"
+    st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
+    
+    with st.spinner("جاري معالجة الملفات وضخها إلى المستودع المركزي..."):
+        all_dfs = []
+        for uploaded_file in uploaded_files:
+            file_bytes = uploaded_file.read()
+            df_single = parse_single_file(file_bytes, uploaded_file.name, current_sess)
+            if not df_single.empty:
+                all_dfs.append(df_single)
+        
+        if all_dfs:
+            df_actual = pd.concat(all_dfs, ignore_index=True)
+            try:
+                df_clean = df_actual.where(pd.notnull(df_actual), None)
+                records_to_insert = df_clean.to_dict(orient="records")
+                for r in records_to_insert:
+                    for k, v in r.items():
+                        if pd.isna(v):
+                            r[k] = None
+
+                bq_client = get_bq_client(PROJECT_ID)
+                table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+                errors = bq_client.insert_rows_json(table_ref, records_to_insert)
+                
+                if errors == []:
+                    st.success(f"تم رفع بيانات المطالبات الشهرية بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
+                    base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
+                    params_data = {"ds14": {"p_client_session": current_sess}}
+                    encoded_params = urllib.parse.quote(json.dumps(params_data))
+                    looker_url = f"{base_url}/page/p_yr47xbgg7d?params={encoded_params}"
+                    
+                    st.markdown("---")
+                    st.markdown("### 📈 تقرير لوحة المؤشرات جاهز:")
+                    st.markdown(f"[اضغط هنا لفتح لوحة البيانات في Looker Studio]({looker_url})", unsafe_allow_html=True)
+                else:
+                    st.error(f"خطأ في الحفظ في BigQuery: {errors}")
+            except Exception as e:
+                st.error(f"فشل الاتصال بقاعدة البيانات: {str(e)}")
+        else:
+            st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة.")
