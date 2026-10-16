@@ -196,7 +196,6 @@ def extract_structured_rows_from_pdf_bytes(file_bytes):
     return all_structured_rows
 
 def parse_single_file(file_bytes, file_name, session_id):
-    # معالجة ملفات الـ Excel مباشرة إذا كانت مرفقة لتجنب أخطاء الـ PDF Parser
     if file_name.lower().endswith(('.xlsx', '.xls', '.csv')):
         try:
             df_excel = pd.read_excel(io.BytesIO(file_bytes)) if file_name.lower().endswith(('.xlsx', '.xls')) else pd.read_csv(io.BytesIO(file_bytes))
@@ -348,7 +347,7 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. ترويسة اللغة (العربية والإنجليزية بشكل تفاعلي نظيف)
+# 1. ترويسة اللغة
 st.markdown("""
     <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 1.5rem; padding-top: 1rem;">
         <span style="border: 1.5px solid #0E243A; background-color: transparent; color: #0E243A; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem;">English</span>
@@ -356,7 +355,7 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# 2. الشعار الرسمي في المنتصف تماماً (مع معالجة استقرار الرابط)
+# 2. الشعار الرسمي في المنتصف تماماً
 col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
 with col_logo_center:
     try:
@@ -380,17 +379,14 @@ with col_logo_center:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3. فتح بطاقة المحتوى البيضاء الكبرى (Main White Card Container)
+# 3. فتح بطاقة المحتوى البيضاء الكبرى
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
-# العنوان الرئيسي والنبذة التعريفية الاستراتيجية
 st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
 st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
 
-# شارة سدايا الأمنية داخل البطاقة البيضاء الكبرى
 st.markdown('<div class="sdaia-box-okular">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
-# منطقة رفع الملفات وزر التشغيل التنفيذي متجاوران داخل نفس البطاقة البيضاء
 col_upload, col_btn = st.columns([1.3, 1])
 
 with col_upload:
@@ -404,7 +400,6 @@ with col_btn:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
     launch_button = st.button("تشغيل اللوحة التنفيذية", type="primary")
 
-# إغلاق البطاقة البيضاء الكبرى
 st.markdown('</div>', unsafe_allow_html=True)
 
 # 4. الفوتر المتمركز بالأسفل تماماً
@@ -413,7 +408,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# 5. معالجة البيانات والاتصال بـ BigQuery (محدث وآمن تماماً ضد الأخطاء)
+# 5. معالجة البيانات والاتصال بـ BigQuery
 if uploaded_files and launch_button:
     current_sess = f"sess_{str(uuid.uuid4())[:8]}"
     st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
@@ -453,6 +448,6 @@ if uploaded_files and launch_button:
                 else:
                     st.error(f"خطأ في الحفظ في BigQuery: {errors}")
             except Exception as e:
-                st.error(fينشل الاتصال بقاعدة البيانات: {str(e)}")
+                st.error(f"فشل الاتصال بقاعدة البيانات: {str(e)}")
         else:
             st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة.")
