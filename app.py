@@ -275,4 +275,80 @@ def parse_single_file(file_bytes, file_name, session_id):
                     "class_tier": current_class_tier,
                     "section_type": "Monthly Claims",
                     "month_code": row_date,
-                    "active_lives": int(nums[0]) if len
+                    "active_lives": int(nums[0]) if len(nums) > 0 else 100,
+                    "claims_count": int(nums[1]) if len(nums) > 1 else 0,
+                    "paid_claims_sar": float(nums[2]) if len(nums) > 2 else 0.0,
+                    "paid_claims_vat_sar": float(nums[3]) if len(nums) > 3 else 0.0,
+                    "OS_claims_count": int(nums[4]) if len(nums) > 4 else 0,
+                    "OS_paid_claims_sar": float(nums[5]) if len(nums) > 5 else 0.0,
+                    "OS_paid_claims_vat_sar": float(nums[6]) if len(nums) > 6 else 0.0,
+                    "benefit_name": None,
+                    "provider_name": None
+                })
+
+    return pd.DataFrame(monthly_rows)
+
+col_lang1, col_lang2, col_lang3 = st.columns([8, 1, 1])
+with col_lang2:
+    st.button("العربية", key="lang_ar")
+with col_lang3:
+    st.button("English", key="lang_en")
+
+st.markdown('<div class="landing-card">', unsafe_allow_html=True)
+st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
+st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
+st.markdown('<div class="sdaia-badge">🔒 آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
+
+uploaded_files = st.file_uploader("اسحب ملفات البيانات هنا أو اضغط للاختيار (CSV / XLSX / PDF)", type=["pdf", "csv", "xlsx"], accept_multiple_files=True)
+st.markdown("<br>", unsafe_allow_html=True)
+launch_button = st.button("تشغيل اللوحة التنفيذية")
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+st.markdown(
+    '<p style="text-align: center; color: #6b7280; font-size: 0.85rem;">© 2026 فهد الجار الله - جميع حقوق محفوظة لبيئة العمل السيادية</p>',
+    unsafe_allow_html=True
+)
+
+if uploaded_files and launch_button:
+    current_sess = f"sess_{str(uuid.uuid4())[:8]}"
+    st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
+    
+    with st.spinner("جاري معالجة الملفات وضخها إلى المستودع المركزي..."):
+        all_dfs = []
+        for uploaded_file in uploaded_files:
+            file_bytes = uploaded_file.read()
+            df_single = parse_single_file(file_bytes, uploaded_file.name, current_sess)
+            if not df_single.empty:
+                all_dfs.append(df_single)
+        
+        if all_dfs:
+            df_actual = pd.concat(all_dfs, ignore_index=True)
+            try:
+                df_clean = df_actual.where(pd.notnull(df_actual), None)
+                records_to_insert = df_clean.to_dict(orient="records")
+                for r in records_to_insert:
+                    for k, v in r.items():
+                        if pd.isna(v):
+                            r[k] = None
+
+                bq_client = get_bq_client(PROJECT_ID)
+                table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+                errors = bq_client.insert_rows_json(table_ref, records_to_insert)
+                
+                if errors == []:
+                    st.success(f"تم رفع بيانات المطالبات الشهرية بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
+                    base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
+                    params_data = {"ds14": {"p_client_session": current_sess}}
+                    encoded_params = urllib.parse.quote(json.dumps(params_data))
+                    looker_url = f"{base_url}/page/p_yr47xbgg7d?params={encoded_params}"
+                    
+                    st.markdown("---")
+                    st.markdown("### 📈 تقرير لوحة المؤشرات جاهز:")
+                    st.markdown(f"[اضغط هنا لفتح لوحة البيانات في Looker Studio]({looker_url})", unsafe_allow_html=True)
+                else:
+                    st.error(f"خطأ في الحفظ في BigQuery: {errors}")
+            except Exception as e:
+                st.error(f"فشل الاتصال بقاعدة البيانات: {str(e)}")
+        else:
+            st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة.")
