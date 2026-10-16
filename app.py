@@ -1,9 +1,9 @@
 import streamlit as st
 
-# إعداد الصفحة كأول أمر تنفيذي إلزامي لمنع أخطاء الـ TypeError
+# ضبط إعدادات الصفحة بشكل مباشر وآمن ومتوافق مع كافة الإصدارات
 st.set_page_config(
     page_title="منصة الاستشارات التنفيذية | Claims Intelligence",
-    page_layout="wide",
+    layout="wide",
     initial_sidebar_state="collapsed"
 )
 
@@ -24,7 +24,7 @@ import requests
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
-# تخصيص الـ CSS للهوية السيادية والنظيف (Light Mode)
+# تخصيص الـ CSS للهوية السيادية والنظيفة (Light Mode) وتفعيل اتجاه RTL بالكامل
 st.markdown("""
     <style>
     .stApp {
