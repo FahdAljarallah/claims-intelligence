@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضبط الصناديق البيضاء والترتيب الهرمي النظيف
+# حقن أنماط الـ CSS المتقدمة لضبط الهيكل وإزالة الفراغات الوهمية
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -53,7 +53,7 @@ st.markdown("""
         margin-right: auto;
     }
     
-    /* صندوق العنوان والشرح المنفصل تماماً */
+    /* صندوق العنوان والشرح */
     .title-desc-box {
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
@@ -77,7 +77,7 @@ st.markdown("""
         line-height: 1.7;
     }
     
-    /* صندوق سدايا الأمني المتطابق تماماً في التصميم واللون */
+    /* صندوق سدايا الأمني */
     .sdaia-box-okular {
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
@@ -353,35 +353,14 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# 2. الشعار الرسمي في المنتصف تماماً
-col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
-with col_logo_center:
-    try:
-        logo_url = "https://lh3.googleusercontent.com/d/11LDGzgTrWg18ubhLZ1p5ocf6DTL80e1W=w1000?authuser=0"
-        response = requests.get(logo_url)
-        if response.status_code == 200:
-            logo_img = Image.open(io.BytesIO(response.content))
-            st.image(logo_img, use_container_width=True)
-        else:
-            logo_img = Image.open("Full Logo - 600-400 _4.png")
-            st.image(logo_img, use_container_width=True)
-    except Exception:
-        st.markdown("""
-            <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center; color: #0E243A; font-weight: 700;">
-                FAHD ALJARALLAH LOGO
-            </div>
-        """, unsafe_allow_html=True)
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-# 3. فتح البطاقة المركزية الكبرى
+# 2. إزالة صندوق الشعار الفارغ نهائياً، والبدء مباشرة بالبطاقة المركزية الكبرى
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
-# صندوق العنوان والشرح المنفصل تماماً (مطابق تماماً لتصميم صندوق سدايا)
+# صندوق العنوان والشرح المنفصل
 st.markdown("""
     <div class="title-desc-box">
         <div class="platform-title">منصة الاستشارات التنفيذية</div>
-        <div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>
+        <div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجلس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>
     </div>
 """, unsafe_allow_html=True)
 
@@ -405,10 +384,10 @@ with col_btn:
 # إغلاق البطاقة البيضاء الكبرى
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 4. حاوية النتائج والفوتر (تظهر تحت العناصر بالكامل لتجنب التداخل)
+# 3. حاوية النتائج والفوتر (تظهر تحت العناصر بالكامل لتجنب التداخل)
 result_container = st.container()
 
-# 5. معالجة البيانات والاتصال بـ BigQuery
+# 4. معالجة البيانات والاتصال بـ BigQuery
 if uploaded_files and launch_button:
     with result_container:
         current_sess = f"sess_{str(uuid.uuid4())[:8]}"
@@ -453,7 +432,7 @@ if uploaded_files and launch_button:
             else:
                 st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة.")
 
-# 6. الفوتر السيادي السفلي (مستقر تماماً في الأسفل)
+# 5. الفوتر السيادي السفلي (مستقر تماماً في الأسفل وتحت النتائج)
 st.markdown(
     '<p class="sovereign-footer">© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية.</p>',
     unsafe_allow_html=True
