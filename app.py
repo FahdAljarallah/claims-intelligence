@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضمان احتواء كافة العناصر داخل البطاقة البيضاء ومطابقة تصميم Okular حرفياً
+# حقن أنماط الـ CSS المتقدمة لضبط اتجاه RTL، احواء كافة العناصر داخل البطاقة البيضاء، ومطابقة تصميم Okular حرفياً
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -39,18 +39,7 @@ st.markdown("""
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     
-    /* 2. ترويسة اللغة في أقصى اليمين تماماً حسب التصميم الأصلي */
-    .lang-row-custom {
-        display: flex;
-        justify-content: flex-end;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 1.5rem;
-        padding-top: 1rem;
-        direction: rtl;
-    }
-    
-    /* 3. البطاقة المركزية الكبرى التي تحتضن جميع العناصر بالداخل دون عزل */
+    /* 2. البطاقة المركزية الكبرى التي تحتضن كافة عناصر المحتوى بالداخل دون عزل */
     .main-container-card {
         background: #FFFFFF;
         border: 1px solid rgba(226, 232, 240, 0.9);
@@ -62,7 +51,7 @@ st.markdown("""
         text-align: right;
     }
     
-    /* 4. العنوان الرئيسي والوصف الاستراتيجي */
+    /* 3. العنوان الرئيسي والوصف الاستراتيجي */
     .platform-title {
         font-size: 2.1rem;
         font-weight: 800;
@@ -83,7 +72,7 @@ st.markdown("""
         margin-right: auto;
     }
     
-    /* 5. شريط أمان وامتثال سدايا (SDAIA Security Box) داخل البطاقة البيضاء */
+    /* 4. شريط أمان وامتثال سدايا (SDAIA Security Box) مطابق لتصميم Okular */
     .sdaia-box-okular {
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
@@ -99,7 +88,7 @@ st.markdown("""
         direction: rtl;
     }
     
-    /* 6. تنسيق عناصر رفع الملفات وزر التشغيل التنفيذي المتجاور */
+    /* 5. تنسيق عناصر رفع الملفات وزر التشغيل التنفيذي المتجاور */
     .stFileUploader {
         direction: rtl;
         text-align: right;
@@ -123,7 +112,7 @@ st.markdown("""
         box-shadow: 0 6px 16px rgba(14, 36, 58, 0.35);
     }
     
-    /* 7. الفوتر الهادئ والسيادي بالأسفل */
+    /* 6. الفوتر الهادئ والسيادي بالأسفل */
     .sovereign-footer {
         text-align: center;
         color: #64748b;
@@ -334,11 +323,11 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. ترويسة اللغة في أقصى اليمين تماماً (زر العربية مفعل باللون الكحلي السيادي #0E243A، وزر English شفاف بخط كحلي)
+# 1. ترويسة اللغة في أقصى اليمين تماماً (بالترتيب الصحيح: English ثم العربية المحددة بالكحلي السيادي #0E243A)
 st.markdown("""
     <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 1.5rem; padding-top: 1rem;">
+        <span style="border: 1.5px solid #0E243A; background-color: transparent; color: #0E243A; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;">English</span>
         <span style="border: 1.5px solid #0E243A; background-color: #0E243A; color: #FFFFFF; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;">العربية</span>
-        <span style="border: 1.5px solid #CBD5E1; background-color: transparent; color: #0E243A; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;">English</span>
     </div>
 """, unsafe_allow_html=True)
 
@@ -363,14 +352,14 @@ with col_logo_center:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3. فتح البطاقة الكبرى البيضاء التي تحتوي بالداخل على كافة العناصر (العنوان، الوصف، سدايا، الرفع، وزر التشغيل)
+# 3. فتح بطاقة المحتوى البيضاء الكبرى (Main White Card Container) لتشمل كافة العناصر بالداخل
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
-# العنوان الرئيسي والنبذة الاستراتيجية
+# العنوان الرئيسي والنبذة التعريفية الاستراتيجية
 st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
 st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
 
-# شريط أمان سدايا (SDAIA Badge) متناسق داخل البطاقة البيضاء
+# شارة سدايا الأمنية داخل البطاقة البيضاء
 st.markdown('<div class="sdaia-box-okular">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
 # منطقة رفع الملفات وزر التشغيل التنفيذي متجاوران داخل نفس البطاقة البيضاء الكبرى
@@ -423,6 +412,8 @@ if uploaded_files and launch_button:
                 table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
                 errors = bq_client.insert_rows_json(table_ref, records_to_insert)
                 
+                if errors == == []: # syntax check safety
+                    pass
                 if errors == []:
                     st.success(f"تم رفع بيانات المطالبات الشهرية بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
                     base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
