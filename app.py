@@ -26,7 +26,6 @@ st.set_page_config(
 if 'lang' not in st.session_state:
     st.session_state.lang = 'ar'
 
-# التعامل مع تغيير اللغة عبر Query Parameters
 query_params = st.query_params
 if "lang" in query_params:
     lang_val = query_params["lang"]
@@ -37,7 +36,6 @@ is_ar = st.session_state.lang == 'ar'
 text_align = "right" if is_ar else "left"
 direction = "rtl" if is_ar else "ltr"
 
-# حقن أنماط الـ CSS المتقدمة مع ضبط ألوان خطوط أزرار اللغة بدقة صارمة
 st.markdown(f"""
     <style>
     #MainMenu {{visibility: hidden;}}
@@ -60,7 +58,6 @@ st.markdown(f"""
         display: none !important;
     }}
     
-    /* أزرار المنصة الرئيسية */
     .stButton button {{
         width: 100%;
         background-color: #0E243A;
@@ -76,7 +73,6 @@ st.markdown(f"""
         background-color: #17324D;
     }}
     
-    /* تصميم أزرار اللغة (المفعل كحلي بخط أبيض، والغير مفعل أبيض بخط كحلي) */
     .lang-bar-container {{
         display: flex;
         justify-content: flex-end;
@@ -202,7 +198,6 @@ translations = {
 
 t = translations[st.session_state.lang]
 
-# أزرار اللغة المتجاوران في أعلى الصفحة
 en_class = "lang-pill lang-pill-active" if not is_ar else "lang-pill lang-pill-inactive"
 ar_class = "lang-pill lang-pill-active" if is_ar else "lang-pill lang-pill-inactive"
 
@@ -368,10 +363,11 @@ if uploaded_files and launch_button:
                         encoded_params = urllib.parse.quote(json.dumps(params_data))
                         looker_url = f"{base_url}/page/p_yr47xbgg7d?params={encoded_params}"
                         
+                        # تم تغيير target="_blank" إلى target="_self" ليفتح الرابط على نفس الصفحة
                         st.markdown(f"""
                             <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 24px; margin-top: 20px; text-align: {text_align}; direction: {direction}; box-shadow: 0 1px 4px rgba(0,0,0,0.02); max-width: 900px; margin-left: auto; margin-right: auto;">
                                 <h3 style="color: #0E243A; font-size: 1.2rem; font-weight: 700; margin-bottom: 12px;">{t['ready']}</h3>
-                                <p style="margin-bottom: 0;"><a href="{looker_url}" target="_blank" style="color: #0E243A; font-weight: 700; text-decoration: underline;">{t['link']}</a></p>
+                                <p style="margin-bottom: 0;"><a href="{looker_url}" target="_self" style="color: #0E243A; font-weight: 700; text-decoration: underline;">{t['link']}</a></p>
                             </div>
                         """, unsafe_allow_html=True)
                     else:
