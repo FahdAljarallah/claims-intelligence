@@ -26,7 +26,7 @@ st.set_page_config(
 if 'lang' not in st.session_state:
     st.session_state.lang = 'ar'
 
-# التعامل مع الضغط على أزرار اللغة عبر Query Parameters لتجاوز قيود أزرار ستريمليت
+# التعامل مع تغيير اللغة عبر Query Parameters
 query_params = st.query_params
 if "lang" in query_params:
     lang_val = query_params["lang"]
@@ -37,7 +37,7 @@ is_ar = st.session_state.lang == 'ar'
 text_align = "right" if is_ar else "left"
 direction = "rtl" if is_ar else "ltr"
 
-# حقن أنماط الـ CSS النظيفة والاحترافية
+# حقن أنماط الـ CSS المتقدمة مع ضبط ألوان خطوط أزرار اللغة بدقة صارمة
 st.markdown(f"""
     <style>
     #MainMenu {{visibility: hidden;}}
@@ -76,7 +76,7 @@ st.markdown(f"""
         background-color: #17324D;
     }}
     
-    /* تصميم أزرار اللغة بـ HTML النقي لضمان ظهور النصوص والألوان بدقة متناهية */
+    /* تصميم أزرار اللغة (المفعل كحلي بخط أبيض، والغير مفعل أبيض بخط كحلي) */
     .lang-bar-container {{
         display: flex;
         justify-content: flex-end;
@@ -97,17 +97,18 @@ st.markdown(f"""
         text-align: center;
     }}
     .lang-pill-active {{
-        background-color: #0E243A;
-        color: #FFFFFF;
-        border: 1.5px solid #0E243A;
+        background-color: #0E243A !important;
+        color: #FFFFFF !important;
+        border: 1.5px solid #0E243A !important;
     }}
     .lang-pill-inactive {{
-        background-color: #FFFFFF;
-        color: #0E243A;
-        border: 1.5px solid #0E243A;
+        background-color: #FFFFFF !important;
+        color: #0E243A !important;
+        border: 1.5px solid #0E243A !important;
     }}
     .lang-pill-inactive:hover {{
-        background-color: #F1F5F9;
+        background-color: #F1F5F9 !important;
+        color: #0E243A !important;
     }}
 
     .main-container-card {{
@@ -201,7 +202,7 @@ translations = {
 
 t = translations[st.session_state.lang]
 
-# أزرار اللغة النقية بـ HTML مطابقة تماماً للتصميم الأصلي (العربية والإنجليزية متجاوران)
+# أزرار اللغة المتجاوران في أعلى الصفحة
 en_class = "lang-pill lang-pill-active" if not is_ar else "lang-pill lang-pill-inactive"
 ar_class = "lang-pill lang-pill-active" if is_ar else "lang-pill lang-pill-inactive"
 
@@ -282,8 +283,8 @@ def parse_single_file(file_bytes, file_name, session_id):
                     "paid_claims_sar": float(row.get('paid_claims_sar', 880000.0)),
                     "paid_claims_vat_sar": float(row.get('paid_claims_vat_sar', 0.0)),
                     "OS_claims_count": 0,
-                    "OS_paid_claims_sar": float(row.get('OS_paid_claims_sar', 0.0)),
-                    "OS_paid_claims_vat_sar": float(row.get('OS_paid_claims_vat_sar', 0.0)),
+                    "OS_paid_claims_sar": 0.0,
+                    "OS_paid_claims_vat_sar": 0.0,
                     "benefit_name": None,
                     "provider_name": None
                 })
