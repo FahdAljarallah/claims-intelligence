@@ -23,7 +23,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 1. إدارة حالة اللغة (افتراضياً العربية)
 if 'lang' not in st.session_state:
     st.session_state.lang = 'ar'
 
@@ -31,7 +30,6 @@ is_ar = st.session_state.lang == 'ar'
 text_align = "right" if is_ar else "left"
 direction = "rtl" if is_ar else "ltr"
 
-# 2. حقن أنماط الـ CSS لضبط الهيكل وزر اللغة تماماً مثل التصميم الأصلي
 st.markdown(f"""
     <style>
     #MainMenu {{visibility: hidden;}}
@@ -54,7 +52,45 @@ st.markdown(f"""
         display: none !important;
     }}
     
-    /* البطاقة المركزية الكبرى */
+    /* تنسيق حاوية زر اللغة العلوي لضمان عرض النص كاملاً وبشكل أنيق */
+    .top-lang-bar {{
+        display: flex;
+        justify-content: flex-end;
+        max-width: 900px;
+        margin: 1.5rem auto 0 auto;
+        padding: 0 10px;
+    }}
+
+    .stButton button {{
+        width: 100%;
+        background-color: #0E243A;
+        color: #FFFFFF;
+        font-weight: 700;
+        padding: 0.85rem 1.5rem;
+        border-radius: 8px;
+        border: none;
+        box-shadow: 0 4px 12px rgba(14, 36, 58, 0.25);
+        height: 48px;
+    }}
+    .stButton button:hover {{
+        background-color: #17324D;
+    }}
+    
+    /* تنسيق خاص لزر التبديل العلوي ليطابق الهوية */
+    div[data-testid="stHorizontalBlock"] div.stButton > button {{
+        background-color: transparent !important;
+        color: #0E243A !important;
+        border: 1.5px solid #0E243A !important;
+        font-weight: 600 !important;
+        height: 38px !important;
+        padding: 0.2rem 1rem !important;
+        box-shadow: none !important;
+    }}
+    div[data-testid="stHorizontalBlock"] div.stButton > button:hover {{
+        background-color: #0E243A !important;
+        color: #FFFFFF !important;
+    }}
+
     .main-container-card {{
         background: #FFFFFF;
         border: 1px solid rgba(226, 232, 240, 0.9);
@@ -70,7 +106,6 @@ st.markdown(f"""
         margin-right: auto;
     }}
     
-    /* صندوق العنوان والشرح المنفصل */
     .title-desc-box {{
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
@@ -94,7 +129,6 @@ st.markdown(f"""
         line-height: 1.7;
     }}
     
-    /* صندوق سدايا الأمني */
     .sdaia-box-okular {{
         background: #F8FAFC;
         border: 1px solid #CBD5E1;
@@ -110,21 +144,6 @@ st.markdown(f"""
         direction: {direction};
     }}
     
-    .stButton button {{
-        width: 100%;
-        background-color: #0E243A;
-        color: #FFFFFF;
-        font-weight: 700;
-        padding: 0.85rem 1.5rem;
-        border-radius: 8px;
-        border: none;
-        box-shadow: 0 4px 12px rgba(14, 36, 58, 0.25);
-        height: 48px;
-    }}
-    .stButton button:hover {{
-        background-color: #17324D;
-    }}
-    
     .sovereign-footer {{
         text-align: center;
         color: #64748b;
@@ -136,7 +155,6 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# 3. القواميس ثنائية اللغة
 translations = {
     'ar': {
         'title': "منصة الاستشارات التنفيذية",
@@ -164,10 +182,10 @@ translations = {
 
 t = translations[st.session_state.lang]
 
-# 4. ترويسة اللغة العلوية المتناسقة تماماً مع التصميم المعياري
-col_space, col_lang_btn = st.columns([10, 1])
-with col_lang_btn:
-    if st.button("English" if is_ar else "العربية", key="lang_toggle_top"):
+# ضبط عرض عمود زر اللغة لضمان ظهوره كاملاً
+col_empty, col_btn = st.columns([11, 1.2])
+with col_btn:
+    if st.button("English" if is_ar else "العربية", key="lang_top_fixed"):
         st.session_state.lang = 'en' if is_ar else 'ar'
         st.rerun()
 
@@ -251,7 +269,6 @@ def parse_single_file(file_bytes, file_name, session_id):
             pass
     return pd.DataFrame()
 
-# 5. الشعار الرسمي في المنتصف
 col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
 with col_logo_center:
     try:
@@ -272,10 +289,8 @@ with col_logo_center:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 6. فتح البطاقة المركزية الكبرى
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
-# العنوان والشرح المترجم
 st.markdown(f"""
     <div class="title-desc-box">
         <div class="platform-title">{t['title']}</div>
@@ -283,10 +298,8 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 
-# صندوق سدايا الأمني المترجم
 st.markdown(f'<div class="sdaia-box-okular">{t["security"]}</div>', unsafe_allow_html=True)
 
-# منطقة رفع الملفات وزر التشغيل التنفيذي
 col_upload, col_btn = st.columns([1.3, 1])
 
 with col_upload:
@@ -304,7 +317,6 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 result_container = st.container()
 
-# 7. المعالجة والاتصال بـ BigQuery
 if uploaded_files and launch_button:
     with result_container:
         current_sess = f"sess_{str(uuid.uuid4())[:8]}"
@@ -345,5 +357,4 @@ if uploaded_files and launch_button:
             else:
                 st.warning("No matching data extracted from uploaded files.")
 
-# 8. الفوتر السيادي
 st.markdown(f'<p class="sovereign-footer">{t["footer"]}</p>', unsafe_allow_html=True)
