@@ -22,127 +22,109 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة (خلفية كحلية سيادية عميقة + تأثيرات Glassmorphism ودعم اتجاه RTL)
+# حقن أنماط الـ CSS المتقدمة لضبط الواجهة بالميلي متر مطابقة للصورة المعتمدة
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
+    /* 1. الخلفية العامة: فانيلا/بيج فاتح ونظيف جداً */
     .stApp {
-        background: radial-gradient(circle at 50% 20%, #17324D 0%, #0E243A 100%);
-        color: #f3f4f6;
+        background-color: #F4F5F7;
+        color: #0F172A;
         direction: rtl;
         text-align: right;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     
-    /* صف تغيير اللغة في الأعلى */
+    /* 2. الهيدر وأزرار اللغات في أقصى اليمين/اليسار */
     .lang-row {
         display: flex;
         justify-content: flex-end;
-        gap: 15px;
+        align-items: center;
+        gap: 10px;
         margin-bottom: 1.5rem;
+        padding-top: 1rem;
     }
     
-    /* حاوية الشعار الرسمي (600x400 سيادي) */
-    .sovereign-logo-container {
-        width: 100%;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        margin-bottom: 2rem;
-    }
-    .sovereign-logo-box {
-        width: 300px;
-        height: 200px;
-        background: rgba(255, 255, 255, 0.03);
-        border: 2px dashed rgba(255, 255, 255, 0.15);
-        border-radius: 12px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        color: #94a3b8;
-        font-weight: 600;
-        letter-spacing: 1px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-    }
-    
-    /* صندوق المحتوى الرئيسي (Glass Card) */
-    .glass-card {
-        background: rgba(14, 36, 58, 0.75);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+    /* 3. البطاقة المركزية البيضاء النقية مع ظل سينمائي هادئ */
+    .main-container-card {
+        background: #FFFFFF;
+        border: 1px solid rgba(226, 232, 240, 0.8);
         border-radius: 16px;
         padding: 40px;
-        box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
-        backdrop-filter: blur(16px);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
         margin-bottom: 2rem;
     }
     
+    /* 4. التريوسة والعنوان والوصف الاستراتيجي */
     .platform-title {
-        font-size: 2.3rem;
+        font-size: 2.1rem;
         font-weight: 800;
-        color: #ffffff;
-        text-align: right;
+        color: #0F172A;
+        text-align: center;
         margin-bottom: 1rem;
         letter-spacing: -0.5px;
     }
     
     .platform-desc {
-        font-size: 1.05rem;
-        color: #94a3b8;
-        text-align: right;
-        line-height: 1.75;
-        margin-bottom: 2rem;
+        font-size: 1.02rem;
+        color: #475569;
+        text-align: center;
+        line-height: 1.7;
+        margin-bottom: 2.5rem;
+        max-width: 900px;
+        margin-left: auto;
+        margin-right: auto;
     }
     
-    /* شارة سدايا النخبوية */
-    .sdaia-badge {
-        background: rgba(16, 185, 129, 0.1);
-        border: 1px solid rgba(16, 185, 129, 0.25);
-        color: #34d399;
-        padding: 14px 18px;
+    /* 5. شريط الأمان والامتثال (SDAIA) */
+    .sdaia-box {
+        background: #F8FAFC;
+        border: 1px solid #E2E8F0;
+        color: #334155;
+        padding: 16px 20px;
         border-radius: 10px;
         font-size: 0.92rem;
-        text-align: right;
-        margin-bottom: 2rem;
+        text-align: center;
+        margin-bottom: 2.5rem;
         line-height: 1.6;
         font-weight: 500;
     }
     
-    /* تنسيق صندوق رفع الملفات */
+    /* 6. تنسيق عناصر رفع الملفات والزر الرئيسي جنباً إلى جنب أو بتناسق تامة */
     .stFileUploader {
         direction: rtl;
         text-align: right;
     }
     
-    /* زر التشغيل التنفيذي السيادي */
+    /* زر التشغيل التنفيذي الفاخر */
     .stButton button {
         width: 100%;
-        background: linear-gradient(135deg, #1e3a8a 0%, #172554 100%);
-        color: #ffffff;
+        background-color: #0F172A;
+        color: #FFFFFF;
         font-weight: 700;
-        padding: 0.9rem 1.5rem;
+        padding: 0.85rem 1.5rem;
         border-radius: 10px;
-        border: 1px solid rgba(59, 130, 246, 0.3);
-        box-shadow: 0 6px 20px rgba(14, 36, 58, 0.6);
+        border: none;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
         transition: all 0.3s ease;
-        font-size: 1.1rem;
+        font-size: 1.05rem;
     }
     .stButton button:hover {
-        background: linear-gradient(135deg, #1d4ed8 100%, #1e3a8a 100%);
-        box-shadow: 0 8px 25px rgba(29, 78, 216, 0.5);
-        border-color: rgba(59, 130, 246, 0.6);
+        background-color: #1E293B;
+        box-shadow: 0 6px 16px rgba(15, 23, 42, 0.3);
     }
     
-    /* الفوتر */
+    /* 7. الفوتر الهادئ والثابت بالأسفل */
     .sovereign-footer {
         text-align: center;
         color: #64748b;
-        font-size: 0.88rem;
+        font-size: 0.85rem;
         margin-top: 3rem;
-        letter-spacing: 0.5px;
+        margin-bottom: 2rem;
+        letter-spacing: 0.3px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -345,49 +327,56 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. صف تغيير اللغة: (العربية / English) في أعلى الواجهة
-col_space, col_ar, col_en = st.columns([6, 1, 1])
-with col_ar:
-    st.button("العربية", key="lang_ar")
+# 1. صف أزرار اللغة (English / العربية) في أقصى اليمين/اليسار بالأعلى
+col_space, col_en, col_ar = st.columns([6, 1, 1])
 with col_en:
     st.button("English", key="lang_en")
+with col_ar:
+    st.button("العربية", key="lang_ar")
 
-# 2. الشعار الرسمي لفهد الجارالله ($600\times400$) في المنتصف تماماً
-st.markdown("""
-    <div class="sovereign-logo-container">
-        <div class="sovereign-logo-box">
-            <span>FAHD ALJARALLAH</span>
-            <span style="font-size: 0.75rem; color: #64748b; margin-top: 4px;">600 × 400 Logo</span>
-        </div>
-    </div>
-""", unsafe_allow_html=True)
+# 2. الشعار الرسمي لفهد الجارالله في المنتصف تماماً بدقة 600x400
+col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
+with col_logo_center:
+    try:
+        logo_img = Image.open("Full Logo - 600-400 .png")
+        st.image(logo_img, use_container_width=True)
+    except Exception:
+        # بديل في حال لم يتم رفع ملف الصورة محلياً بنفس المسار
+        st.markdown("""
+            <div style="width: 100%; height: 140px; background: #F1F5F9; border: 2px dashed #CBD5E1; border-radius: 10px; display: flex; justify-content: center; align-items: center; color: #64748b; font-weight: 600; margin-bottom: 2rem;">
+                600 × 400 شعار فهد الجارالله
+            </div>
+        """, unsafe_allow_html=True)
 
-# 3. صندوق المحتوى الرئيسي (Glass Card)
-st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+# 3. البطاقة المركزية البيضاء النقية (Main Container Card)
+st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
+# العنوان والوصف الاستراتيجي
 st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
 st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
 
-# شارة سدايا النخبوية النصية الحرفية
-st.markdown('<div class="sdaia-badge">🔒 آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية : لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
+# شريط الأمان والامتثال (SDAIA) مع أيقونة الأمان
+st.markdown('<div class="sdaia-box">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية : لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
-# منطقة رفع الملفات (CSV / XLSX / PDF)
-uploaded_files = st.file_uploader(
-    "اسحب ملفات البيانات هنا أو اضغط للاختيار (CSV / XLSX / PDF)",
-    type=["pdf", "csv", "xlsx"],
-    accept_multiple_files=True
-)
+# تقسيم منطقة الرفع وزر التشغيل لترتيب مريح ونظيف داخل البطاقة
+col_upload, col_btn = st.columns([1.3, 1])
 
-st.markdown("<br>", unsafe_allow_html=True)
+with col_upload:
+    uploaded_files = st.file_uploader(
+        "اسحب ملفات البيانات هنا أو اضغط للاختيار (CSV / XLSX / PDF)",
+        type=["pdf", "csv", "xlsx"],
+        accept_multiple_files=True
+    )
 
-# زر التشغيل التنفيذي
-launch_button = st.button("تشغيل اللوحة التنفيذية", type="primary")
+with col_btn:
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)  # مسافة مطابقة لمستوى الرفع
+    launch_button = st.button("تشغيل اللوحة التنفيذية", type="primary")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 4. الفوتر السيادي في الأسفل تماماً
+# 4. الفوتر الهادئ بالأسفل تماماً
 st.markdown(
-    '<p class="sovereign-footer">2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية</p>',
+    '<p class="sovereign-footer">© 2026 فهد الجار الله - جميع حقوق محفوظة لبيئة العمل السيادية</p>',
     unsafe_allow_html=True
 )
 
