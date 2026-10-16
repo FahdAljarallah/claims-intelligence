@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضبط الهيكل، أزرار اللغة، والبطاقة البيضاء المتكاملة
+# حقن أنماط الـ CSS المتقدمة لضبط الهيكل وإزالة الفراغات الوهمية
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -353,7 +353,7 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# 2. إرجاع الشعار الرسمي في المنتصف تماماً (داخل الصندوق النظيف)
+# 2. الشعار الرسمي في المنتصف تماماً (تم إزالة الصندوق الخارجي الزائد)
 col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
 with col_logo_center:
     try:
@@ -367,12 +367,13 @@ with col_logo_center:
             st.image(logo_img, use_container_width=True)
     except Exception:
         st.markdown("""
-            <div style="width: 100%; height: 100px; display: flex; justify-content: center; align-items: center; color: #0E243A; font-weight: 800; font-size: 1.3rem;">
+            <div style="width: 100%; height: 80px; display: flex; justify-content: center; align-items: center; color: #0E243A; font-weight: 800; font-size: 1.3rem;">
                 فهد الجارالله
             </div>
         """, unsafe_allow_html=True)
 
-st.markdown("<br>", unsafe_allow_html=True)
+# تباسيط وفراغات نظيفة ومدروسة بدقة
+st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
 # 3. فتح البطاقة المركزية الكبرى
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
@@ -405,7 +406,7 @@ with col_btn:
 # إغلاق البطاقة البيضاء الكبرى
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 4. حاوية النتائج والفوتر (تظهر تحت العناصر بالكامل)
+# 4. حاوية النتائج والفوتر (تظهر تحت العناصر بالكامل لتجنب التداخل)
 result_container = st.container()
 
 # 5. معالجة البيانات والاتصال بـ BigQuery
