@@ -30,6 +30,7 @@ is_ar = st.session_state.lang == 'ar'
 text_align = "right" if is_ar else "left"
 direction = "rtl" if is_ar else "ltr"
 
+# حقن أنماط الـ CSS المتقدمة وتخصيص أزرار اللغة المتجورة
 st.markdown(f"""
     <style>
     #MainMenu {{visibility: hidden;}}
@@ -52,15 +53,7 @@ st.markdown(f"""
         display: none !important;
     }}
     
-    /* تنسيق حاوية زر اللغة العلوي لضمان عرض النص كاملاً وبشكل أنيق */
-    .top-lang-bar {{
-        display: flex;
-        justify-content: flex-end;
-        max-width: 900px;
-        margin: 1.5rem auto 0 auto;
-        padding: 0 10px;
-    }}
-
+    /* تنسيق عام لأزرار المنصة */
     .stButton button {{
         width: 100%;
         background-color: #0E243A;
@@ -76,21 +69,6 @@ st.markdown(f"""
         background-color: #17324D;
     }}
     
-    /* تنسيق خاص لزر التبديل العلوي ليطابق الهوية */
-    div[data-testid="stHorizontalBlock"] div.stButton > button {{
-        background-color: transparent !important;
-        color: #0E243A !important;
-        border: 1.5px solid #0E243A !important;
-        font-weight: 600 !important;
-        height: 38px !important;
-        padding: 0.2rem 1rem !important;
-        box-shadow: none !important;
-    }}
-    div[data-testid="stHorizontalBlock"] div.stButton > button:hover {{
-        background-color: #0E243A !important;
-        color: #FFFFFF !important;
-    }}
-
     .main-container-card {{
         background: #FFFFFF;
         border: 1px solid rgba(226, 232, 240, 0.9);
@@ -182,11 +160,45 @@ translations = {
 
 t = translations[st.session_state.lang]
 
-# ضبط عرض عمود زر اللغة لضمان ظهوره كاملاً
-col_empty, col_btn = st.columns([11, 1.2])
-with col_btn:
-    if st.button("English" if is_ar else "العربية", key="lang_top_fixed"):
-        st.session_state.lang = 'en' if is_ar else 'ar'
+# زرين اللغة المتجاوران في أعلى الصفحة (English | العربية)
+col_space, col_en, col_ar = st.columns([10, 0.9, 0.9])
+
+with col_en:
+    is_en_active = (st.session_state.lang == 'en')
+    btn_en_style = "background-color: #0E243A; color: #FFFFFF; border: 1.5px solid #0E243A;" if is_en_active else "background-color: #FFFFFF; color: #0E243A; border: 1.5px solid #CBD5E1;"
+    st.markdown(f"""
+        <style>
+        div[data-testid="column"]:nth-of-type(2) button {{
+            {btn_en_style}
+            font-weight: 600;
+            border-radius: 6px;
+            height: 36px;
+            font-size: 0.85rem;
+            box-shadow: none;
+        }}
+        </style>
+    """, unsafe_allow_html=True)
+    if st.button("English", key="lang_en_pill"):
+        st.session_state.lang = 'en'
+        st.rerun()
+
+with col_ar:
+    is_ar_active = (st.session_state.lang == 'ar')
+    btn_ar_style = "background-color: #0E243A; color: #FFFFFF; border: 1.5px solid #0E243A;" if is_ar_active else "background-color: #FFFFFF; color: #0E243A; border: 1.5px solid #CBD5E1;"
+    st.markdown(f"""
+        <style>
+        div[data-testid="column"]:nth-of-type(3) button {{
+            {btn_ar_style}
+            font-weight: 600;
+            border-radius: 6px;
+            height: 36px;
+            font-size: 0.85rem;
+            box-shadow: none;
+        }}
+        </style>
+    """, unsafe_allow_html=True)
+    if st.button("العربية", key="lang_ar_pill"):
+        st.session_state.lang = 'ar'
         st.rerun()
 
 PROJECT_ID = "claims-intelligence-507611"
@@ -259,8 +271,8 @@ def parse_single_file(file_bytes, file_name, session_id):
                     "paid_claims_sar": float(row.get('paid_claims_sar', 880000.0)),
                     "paid_claims_vat_sar": float(row.get('paid_claims_vat_sar', 0.0)),
                     "OS_claims_count": 0,
-                    "OS_paid_claims_sar": 0.0,
-                    "OS_paid_claims_vat_sar": 0.0,
+                    "OS_paid_claims_sar": float(row.get('OS_paid_claims_sar', 0.0)),
+                    "OS_paid_claims_vat_sar": float(row.get('OS_paid_claims_vat_sar', 0.0)),
                     "benefit_name": None,
                     "provider_name": None
                 })
