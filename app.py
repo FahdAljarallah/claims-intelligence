@@ -36,6 +36,7 @@ is_ar = st.session_state.lang == 'ar'
 text_align = "right" if is_ar else "left"
 direction = "rtl" if is_ar else "ltr"
 
+# حقن أنماط الـ CSS المتقدمة والهوية البصرية السيادية
 st.markdown(f"""
     <style>
     #MainMenu {{visibility: hidden;}}
@@ -303,7 +304,7 @@ def parse_single_file(file_bytes, file_name, session_id):
                     "claims_count": int(row.get('claims_count', 100)),
                     "paid_claims_sar": float(row.get('paid_claims_sar', 880000.0)),
                     "paid_claims_vat_sar": float(row.get('paid_claims_vat_sar', 0.0)),
-                    "OS_claims_count": 0,
+                    "OS_claims_count": int(row.get('OS_claims_count', 0)),
                     "OS_paid_claims_sar": float(row.get('OS_paid_claims_sar', 0.0)),
                     "OS_paid_claims_vat_sar": float(row.get('OS_paid_claims_vat_sar', 0.0)),
                     "benefit_name": None,
@@ -313,7 +314,6 @@ def parse_single_file(file_bytes, file_name, session_id):
         except Exception:
             pass
 
-    # معالجة ملفات الـ PDF الشاملة والمطالبات
     monthly_rows = []
     all_structured_rows = extract_structured_rows_from_pdf_bytes(file_bytes)
     if not all_structured_rows:
@@ -506,7 +506,8 @@ if uploaded_files and launch_button:
                     errors = bq_client.insert_rows_json(table_ref, records_to_insert)
                     
                     if errors == []:
-                        base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
+                        # استخدام النطاق المحدث لـ Looker Studio والفتح على نفس الصفحة
+                        base_url = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
                         params_data = {"ds14": {"p_client_session": current_sess}}
                         encoded_params = urllib.parse.quote(json.dumps(params_data))
                         looker_url = f"{base_url}/page/p_yr47xbgg7d?params={encoded_params}"
