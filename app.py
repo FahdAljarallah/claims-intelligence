@@ -23,14 +23,14 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضبط اتجاه RTL، التوزيع بالبكسل، ومطابقة تصميم Okular حرفياً
+# حقن أنماط الـ CSS المتقدمة لضبط اتجاه RTL، التوزيع بالبكسل، وتطابق التصميم الأصلي حرفياً وبكل بكسل
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* 1. خلفية الصفحة الفانيلا/البيضة الفاخرة وتفعيل اتجاه RTL بالكامل */
+    /* 1. الخلفية العامة العاجية/البيضاء الفاخرة وتفعيل اتجاه RTL بالكامل */
     .stApp {
         background-color: #FBFBF9;
         color: #1E293B;
@@ -40,7 +40,7 @@ st.markdown("""
     }
     
     /* 2. ترويسة اللغة في أقصى اليمين تماماً حسب التصميم الأصلي */
-    .lang-container {
+    .lang-row-custom {
         display: flex;
         justify-content: flex-end;
         align-items: center;
@@ -83,7 +83,7 @@ st.markdown("""
         margin-right: auto;
     }
     
-    /* 5. شريط أمان وامتثال سدايا (SDAIA Security Box) */
+    /* 5. شريط أمان وامتثال سدايا (SDAIA Security Box) مطابق لتصميم Okular */
     .sdaia-box {
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
@@ -334,14 +334,15 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. ترويسة اللغة في أقصى اليمين تماماً بالترتيب الصحيح (English ثم العربية المحددة بالكحلي السيادي)
-col_space, col_en, col_ar = st.columns([6, 1, 1])
-with col_en:
-    st.button("English", key="lang_en")
-with col_ar:
-    st.button("العربية", key="lang_ar")
+# 1. ترويسة اللغة في أقصى اليمين تماماً (زر "English" بخط كحلي وبدون خلفية، وزر "العربية" بخلفية كحلية سيادية `#0E243A` ونص أبيض)
+st.markdown("""
+    <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 1.5rem; padding-top: 1rem;">
+        <span style="border: 1.5px solid #0E243A; background-color: #0E243A; color: #FFFFFF; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;">العربية</span>
+        <span style="border: 1.5px solid #CBD5E1; background-color: transparent; color: #0E243A; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;">English</span>
+    </div>
+""", unsafe_allow_html=True)
 
-# 2. الشعار الرسمي في المنتصف تماماً (عبر رابط مباشر لضمان الظهور الفوري والدقيق)
+# 2. الشعار الرسمي في المنتصف تماماً (عبر رابط مباشر من Google Drive)
 col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
 with col_logo_center:
     try:
@@ -351,7 +352,6 @@ with col_logo_center:
             logo_img = Image.open(io.BytesIO(response.content))
             st.image(logo_img, use_container_width=True)
         else:
-            # محاولة قراءة الشعار محلياً في حال توفره
             logo_img = Image.open("Full Logo - 600-400 _4.png")
             st.image(logo_img, use_container_width=True)
     except Exception:
@@ -363,17 +363,17 @@ with col_logo_center:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3. بطاقة المحتوى البيضاء الكبرى (Main White Card Container) مطابقة لـ Okular
+# 3. بطاقة المحتوى البيضاء الكبرى (Main White Card Container)
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
 # العنوان الرئيسي والنبذة التعريفية بتنسيق RTL سليم
 st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
 st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
 
-# شارة سدايا الأمنية بشريط عرضي متناسق
+# شارة سدايا الأمنية بشريط عرضي متناسق وخلفية بيضاء مع إطار ناعم وأيقونة درع
 st.markdown('<div class="sdaia-box">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
-# منطقة رفع الملفات وزر التشغيل التنفيذي بتنسيق متجاور ودقيق
+# منطقة رفع الملفات وزر التشغيل التنفيذي بتنسيق متجاور ودقيق مطابق لـ Okular
 col_upload, col_btn = st.columns([1.3, 1])
 
 with col_upload:
