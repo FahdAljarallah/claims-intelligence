@@ -27,10 +27,7 @@ st.set_page_config(
 if 'lang' not in st.session_state:
     st.session_state.lang = 'ar'
 
-def set_lang(l):
-    st.session_state.lang = l
-
-# 2. حقن أنماط الـ CSS المتقدمة (تم تصحيح أقواس الـ CSS لتتوافق تماماً مع F-String)
+# 2. حقن أنماط الـ CSS المتقدمة وضبط ترويسة اللغة
 is_ar = st.session_state.lang == 'ar'
 text_align = "right" if is_ar else "left"
 direction = "rtl" if is_ar else "ltr"
@@ -55,6 +52,16 @@ st.markdown(f"""
         margin: 0px !important;
         padding: 0px !important;
         display: none !important;
+    }}
+    
+    /* تنسيق زر اللغة العلوي ليكون أنيقاً وواضحاً */
+    .lang-container {{
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        max-width: 900px;
+        margin: 1rem auto 0.5rem auto;
+        padding: 0 10px;
     }}
     
     /* البطاقة المركزية الكبرى */
@@ -167,12 +174,12 @@ translations = {
 
 t = translations[st.session_state.lang]
 
-# 4. ترويسة اللغة التفاعلية
-col_lang1, col_lang2, col_lang3 = st.columns([8, 1, 1])
-with col_lang2:
-    if st.button("English" if is_ar else "العربية"):
-        set_lang('en' if is_ar else 'ar')
-        st.rerun()
+# 4. ترويسة زر اللغة التفاعلي الحقيقي (بشكل نظيف ومرتب)
+st.markdown('<div class="lang-container">', unsafe_allow_html=True)
+if st.button("English" if is_ar else "العربية", key="lang_btn_toggle"):
+    st.session_state.lang = 'en' if is_ar else 'ar'
+    st.rerun()
+st.markdown('</div>', unsafe_allow_html=True)
 
 PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
