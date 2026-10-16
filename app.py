@@ -1,6 +1,6 @@
 import streamlit as st
 
-# 1. يجب أن يكون st.set_page_config هو أول أمر تنفيذي في التطبيق تماماً
+# إعداد الصفحة كأول أمر تنفيذي إلزامي لمنع أخطاء الـ TypeError
 st.set_page_config(
     page_title="منصة الاستشارات التنفيذية | Claims Intelligence",
     page_layout="wide",
@@ -24,22 +24,18 @@ import requests
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
-# تخصيص الـ CSS لإلغاء العناصر الافتراضية وضبط تصميم الـ Light Mode السيادي بالكامل
+# تخصيص الـ CSS للهوية السيادية والنظيف (Light Mode)
 st.markdown("""
     <style>
-    /* خلفية الصفحة العامة لون فانيلا/بيج فاتح ونظيف */
     .stApp {
         background-color: #F4F5F7;
         direction: rtl;
         text-align: right;
     }
-    
-    /* إخفاء القائمة العلوية وفوتر ستريمليت الافتراضي */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
 
-    /* تنسيق الكرت الأبيض المركزي السينمائي */
     .main-card {
         background-color: #FFFFFF;
         padding: 40px 50px;
@@ -51,7 +47,6 @@ st.markdown("""
         text-align: right;
     }
 
-    /* تنسيق العناوين والنصوص */
     .hero-title {
         color: #0F172A;
         font-weight: 800;
@@ -67,7 +62,6 @@ st.markdown("""
         margin-bottom: 24px;
     }
 
-    /* صندوق الامتثال السيادي */
     .security-badge {
         background-color: #F8FAFC;
         border: 1px solid #E2E8F0;
@@ -80,7 +74,6 @@ st.markdown("""
         direction: rtl;
     }
 
-    /* تنسيق الفوتر السفلي الثابت */
     .footer-text {
         text-align: center;
         color: #64748B;
@@ -89,7 +82,6 @@ st.markdown("""
         direction: rtl;
     }
     
-    /* تنسيق عناصر الرفع والزر لتتناسب مع محاذاة RTL */
     .stFileUploader {
         direction: rtl;
         text-align: right;
@@ -295,7 +287,7 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. الهيدر العلوي (أزرار تبديل اللغات في أقصى اليمين بالتسلسل الصحيح)
+# 1. الهيدر العلوي (أزرار تبديل اللغات في أقصى اليمين)
 header_col1, header_col2, header_col3 = st.columns([2, 6, 2])
 with header_col3:
     lang_col1, lang_col2 = st.columns(2)
@@ -306,7 +298,7 @@ with header_col3:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 2. الشعار الرسمي في المنتصف تماماً (عبر رابط مباشر)
+# 2. الشعار الرسمي في المنتصف تماماً (عبر الرابط المباشر)
 logo_col1, logo_col2, logo_col3 = st.columns([1, 2, 1])
 with logo_col2:
     try:
@@ -327,7 +319,7 @@ with logo_col2:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3. البطاقة المركزية البيضاء (Main Container Card)
+# 3. البطاقة المركزية البيضاء (Main Container)
 st.markdown('<div class="main-card">', unsafe_allow_html=True)
 
 # العنوان الرئيسي والوصف الاستراتيجي
@@ -352,7 +344,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 # 4. الفوتر السيادي السفلي
 st.markdown('<div class="footer-text">© 2026 فهد الجار الله - جميع حقوق محفوظة لبيئة العمل السيادية</div>', unsafe_allow_html=True)
 
-# 5. معالجة البيانات والاتصال بـ BigQuery (دون المساس بكود البايثون الأساسي)
+# 5. معالجة البيانات والاتصال بـ BigQuery
 if uploaded_files and launch_btn:
     current_sess = f"sess_{str(uuid.uuid4())[:8]}"
     st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
