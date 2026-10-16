@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضبط اتجاه RTL، التوزيع بالبكسل، وتطابق التصميم الأصلي حرفياً وبكل بكسل
+# حقن أنماط الـ CSS المتقدمة لضمان احتواء كافة العناصر داخل البطاقة البيضاء ومطابقة تصميم Okular حرفياً
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -50,7 +50,7 @@ st.markdown("""
         direction: rtl;
     }
     
-    /* 3. البطاقة المركزية الكبرى (Main White Card Container) */
+    /* 3. البطاقة المركزية الكبرى التي تحتضن جميع العناصر بالداخل دون عزل */
     .main-container-card {
         background: #FFFFFF;
         border: 1px solid rgba(226, 232, 240, 0.9);
@@ -77,25 +77,25 @@ st.markdown("""
         color: #475569;
         text-align: center;
         line-height: 1.75;
-        margin-bottom: 2.5rem;
+        margin-bottom: 2rem;
         max-width: 900px;
         margin-left: auto;
         margin-right: auto;
     }
     
-    /* 5. شريط أمان وامتثال سدايا (SDAIA Security Box) مطابق لتصميم Okular */
-    .sdaia-box {
+    /* 5. شريط أمان وامتثال سدايا (SDAIA Security Box) داخل البطاقة البيضاء */
+    .sdaia-box-okular {
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
         color: #065F46;
-        padding: 16px 20px;
-        border-radius: 10px;
-        font-size: 0.92rem;
+        padding: 14px 18px;
+        border-radius: 8px;
+        font-size: 0.9rem;
         text-align: center;
-        margin-bottom: 2.5rem;
+        margin-bottom: 2rem;
         line-height: 1.6;
         font-weight: 600;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
         direction: rtl;
     }
     
@@ -334,7 +334,7 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. ترويسة اللغة في أقصى اليمين تماماً (زر "English" بخط كحلي وبدون خلفية، وزر "العربية" بخلفية كحلية سيادية `#0E243A` ونص أبيض)
+# 1. ترويسة اللغة في أقصى اليمين تماماً (زر العربية مفعل باللون الكحلي السيادي #0E243A، وزر English شفاف بخط كحلي)
 st.markdown("""
     <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 1.5rem; padding-top: 1rem;">
         <span style="border: 1.5px solid #0E243A; background-color: #0E243A; color: #FFFFFF; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;">العربية</span>
@@ -342,7 +342,7 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# 2. الشعار الرسمي في المنتصف تماماً (عبر رابط مباشر من Google Drive)
+# 2. الشعار الرسمي في المنتصف تماماً (عبر رابط مباشر)
 col_logo_space1, col_logo_center, col_logo_space2 = st.columns([1, 2, 1])
 with col_logo_center:
     try:
@@ -363,17 +363,17 @@ with col_logo_center:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3. بطاقة المحتوى البيضاء الكبرى (Main White Card Container)
+# 3. فتح البطاقة الكبرى البيضاء التي تحتوي بالداخل على كافة العناصر (العنوان، الوصف، سدايا، الرفع، وزر التشغيل)
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
-# العنوان الرئيسي والنبذة التعريفية بتنسيق RTL سليم
+# العنوان الرئيسي والنبذة الاستراتيجية
 st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
 st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
 
-# شارة سدايا الأمنية بشريط عرضي متناسق وخلفية بيضاء مع إطار ناعم وأيقونة درع
-st.markdown('<div class="sdaia-box">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
+# شريط أمان سدايا (SDAIA Badge) متناسق داخل البطاقة البيضاء
+st.markdown('<div class="sdaia-box-okular">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
-# منطقة رفع الملفات وزر التشغيل التنفيذي بتنسيق متجاور ودقيق مطابق لـ Okular
+# منطقة رفع الملفات وزر التشغيل التنفيذي متجاوران داخل نفس البطاقة البيضاء الكبرى
 col_upload, col_btn = st.columns([1.3, 1])
 
 with col_upload:
@@ -387,6 +387,7 @@ with col_btn:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
     launch_button = st.button("تشغيل اللوحة التنفيذية", type="primary")
 
+# إغلاق البطاقة البيضاء الكبرى
 st.markdown('</div>', unsafe_allow_html=True)
 
 # 4. الفوتر المتمركز بالأسفل تماماً
