@@ -15,7 +15,82 @@ from PIL import Image
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
-st.set_page_config(page_title="مرصد المطالبات التأمينية الذكي", page_icon="📊", layout="wide")
+# 1. إعداد الصفحة بتصميم سينمائي فاخر
+st.set_page_config(
+    page_title="منصة الاستشارات التنفيذية | Executive Advisory Platform",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# 2. حقن أنماط CSS لتوحيد الهوية البصرية السيادية (Cinematic Dark / Premium Theme)
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    
+    .stApp {
+        background: radial-gradient(circle at 50% 20%, #111827 0%, #030712 100%);
+        color: #f3f4f6;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    
+    .landing-card {
+        background: rgba(17, 24, 39, 0.75);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        padding: 40px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(12px);
+        margin-top: 1rem;
+    }
+    
+    .platform-title {
+        font-size: 2.2rem;
+        font-weight: 800;
+        color: #ffffff;
+        text-align: center;
+        margin-bottom: 0.5rem;
+        letter-spacing: -0.5px;
+    }
+    
+    .platform-desc {
+        font-size: 1.05rem;
+        color: #9ca3af;
+        text-align: center;
+        line-height: 1.6;
+        margin-bottom: 2rem;
+    }
+    
+    .sdaia-badge {
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.2);
+        color: #34d399;
+        padding: 12px 16px;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    
+    .stButton button {
+        width: 100%;
+        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        color: white;
+        font-weight: 600;
+        padding: 0.75rem 1.5rem;
+        border-radius: 8px;
+        border: none;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        transition: all 0.3s ease;
+    }
+    .stButton button:hover {
+        background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+        box-shadow: 0 6px 16px rgba(59, 130, 246, 0.5);
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 PROJECT_ID = "claims-intelligence-507611"
 DATASET_ID = "claims_intelligence"
@@ -256,61 +331,3 @@ def parse_single_file(file_bytes, file_name, session_id):
                     "OS_paid_claims_vat_sar": os_vat,
                     "benefit_name": None,
                     "provider_name": None
-                })
-
-    return pd.DataFrame(monthly_rows)
-
-st.title("مرصد المطالبات التأمينية الذكي")
-st.markdown("رفع تقارير المطالبات المالية ومعالجتها وضخها إلى BigQuery (قسم المطالبات الشهرية فقط).")
-
-uploaded_files = st.file_uploader("رفع تقارير المطالبات المالية للشركة (PDF - متعدد)", type=["pdf"], accept_multiple_files=True)
-
-if uploaded_files:
-    if st.button("معالجة الملفات وضخ بيانات المطالبات الشهرية إلى BigQuery", type="primary"):
-        current_sess = f"sess_{str(uuid.uuid4())[:8]}"
-        st.info(f"🔑 تم توليد معرف الجلسة بنجاح: **{current_sess}**")
-        
-        with st.spinner("جاري معالجة الملفات وضخها إلى المستودع المركزي..."):
-            all_dfs = []
-            for uploaded_file in uploaded_files:
-                file_bytes = uploaded_file.read()
-                df_single = parse_single_file(file_bytes, uploaded_file.name, current_sess)
-                if not df_single.empty:
-                    all_dfs.append(df_single)
-            
-            if all_dfs:
-                df_actual = pd.concat(all_dfs, ignore_index=True)
-                
-                try:
-                    df_clean = df_actual.where(pd.notnull(df_actual), None)
-                    records_to_insert = df_clean.to_dict(orient="records")
-                    for r in records_to_insert:
-                        for k, v in r.items():
-                            if pd.isna(v):
-                                r[k] = None
-
-                    bq_client = get_bq_client(PROJECT_ID)
-                    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
-                    errors = bq_client.insert_rows_json(table_ref, records_to_insert)
-                    
-                    if errors == []:
-                        st.success(f"تم رفع بيانات المطالبات الشهرية بنجاح لـ BigQuery برقم الجلسة: {current_sess}")
-                        
-                        base_url = "https://datastudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
-                        params_data = {
-                            "ds14": {
-                                "p_client_session": current_sess
-                            }
-                        }
-                        encoded_params = urllib.parse.quote(json.dumps(params_data))
-                        looker_url = f"{base_url}/page/p_yr47xbgg7d?params={encoded_params}"
-                        
-                        st.markdown("---")
-                        st.markdown("### 📈 تقرير لوحة المؤشرات جاهز:")
-                        st.markdown(f"[اضغط هنا لفتح لوحة البيانات في Looker Studio]({looker_url})", unsafe_allow_html=True)
-                    else:
-                        st.error(f"خطأ في الحفظ في BigQuery: {errors}")
-                except Exception as e:
-                    st.error(f"فشل الاتصال بقاعدة البيانات: {str(e)}")
-            else:
-                st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة.")
