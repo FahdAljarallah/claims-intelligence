@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضبط الهيكل بدقة مطلقة وإزالة أي صناديق فارغة
+# حقن أنماط الـ CSS لإلغاء أي حواجز فارغة وضبط الهيكل بالمللي
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -38,13 +38,14 @@ st.markdown("""
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     
-    /* البطاقة المركزية الكبرى */
+    /* البطاقة المركزية الكبرى التي تحتضن كل شيء بشكل نظيف */
     .main-container-card {
         background: #FFFFFF;
         border: 1px solid rgba(226, 232, 240, 0.9);
         border-radius: 16px;
         padding: 40px;
         box-shadow: 0 12px 35px rgba(14, 36, 58, 0.05);
+        margin-top: 1rem;
         margin-bottom: 2rem;
         direction: rtl;
         text-align: right;
@@ -53,15 +54,12 @@ st.markdown("""
         margin-right: auto;
     }
     
-    /* صندوق العنوان والشرح */
-    .title-desc-box {
-        background: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 12px;
-        padding: 24px;
-        margin-bottom: 20px;
-        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
+    /* صندوق الشعار والعنوان المدمج داخل البطاقة لمنع أي فراغات */
+    .brand-header-box {
         text-align: center;
+        margin-bottom: 1.5rem;
+        border-bottom: 1px solid #F1F5F9;
+        padding-bottom: 1.5rem;
     }
 
     .platform-title {
@@ -347,22 +345,22 @@ def parse_single_file(file_bytes, file_name, session_id):
 
 # 1. ترويسة اللغة
 st.markdown("""
-    <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 1.5rem; padding-top: 1rem;">
-        <span style="border: 1.5px solid #0E243A; background-color: transparent; color: #0E243A; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;">English</span>
-        <span style="border: 1.5px solid #0E243A; background-color: #0E243A; color: #FFFFFF; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;">العربية</span>
+    <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 1rem; padding-top: 0.5rem;">
+        <span style="border: 1.5px solid #0E243A; background-color: transparent; color: #0E243A; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem;">English</span>
+        <span style="border: 1.5px solid #0E243A; background-color: #0E243A; color: #FFFFFF; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem;">العربية</span>
     </div>
 """, unsafe_allow_html=True)
 
-# 2. الشعار الرسمي عبر HTML نقي ومباشر (بدون أعمدة أو حاويات تلقائية تولد صناديق فارغة)
+# 2. فتح البطاقة المركزية الكبرى مباشرة وتحتضن الشعار والعنوان بالداخل لمنع أي صناديق فارغة
+st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
+
+# الشعار داخل البطاقة مباشرة بشكل نظيف ومحمي ضد الفراغات
 logo_url = "https://lh3.googleusercontent.com/d/11LDGzgTrWg18ubhLZ1p5ocf6DTL80e1W=w1000?authuser=0"
 st.markdown(f"""
-    <div style="text-align: center; margin-bottom: 2rem;">
-        <img src="{logo_url}" style="max-width: 240px; height: auto;" alt="Fahd Aljarallah Logo">
+    <div class="brand-header-box">
+        <img src="{logo_url}" style="max-width: 200px; height: auto;" alt="Fahd Aljarallah Logo">
     </div>
 """, unsafe_allow_html=True)
-
-# 3. فتح البطاقة المركزية الكبرى مباشرة
-st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
 # صندوق العنوان والشرح المنفصل
 st.markdown("""
@@ -392,10 +390,10 @@ with col_btn:
 # إغلاق البطاقة البيضاء الكبرى
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 4. حاوية النتائج والفوتر (تظهر تحت العناصر بالكامل لتجنب التداخل)
+# 3. حاوية النتائج والفوتر (تظهر تحت العناصر بالكامل)
 result_container = st.container()
 
-# 5. معالجة البيانات والاتصال بـ BigQuery
+# 4. معالجة البيانات والاتصال بـ BigQuery
 if uploaded_files and launch_button:
     with result_container:
         current_sess = f"sess_{str(uuid.uuid4())[:8]}"
@@ -440,7 +438,7 @@ if uploaded_files and launch_button:
             else:
                 st.warning("تعذر استخراج بيانات مطابقة من الملفات المرفوعة.")
 
-# 6. الفوتر السيادي السفلي (مستقر تماماً في الأسفل)
+# 5. الفوتر السيادي السفلي (مستقر تماماً في الأسفل)
 st.markdown(
     '<p class="sovereign-footer">© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية.</p>',
     unsafe_allow_html=True
