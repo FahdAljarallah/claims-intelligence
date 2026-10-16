@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# حقن أنماط الـ CSS المتقدمة لضبط اتجاه RTL واحتواء كافة عناصر المحتوى داخل البطاقة البيضاء الكبرى مطابقة لتصميم Okular
+# حقن أنماط الـ CSS المتقدمة لضبط الهيكل، أزرار اللغة، والبطاقة البيضاء المتكاملة مطابقة لتصميم Okular تماماً
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -39,7 +39,7 @@ st.markdown("""
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     
-    /* 2. البطاقة المركزية الكبرى التي تحتضن كافة عناصر المحتوى بالداخل دون عزل */
+    /* 2. البطاقة المركزية الكبرى التي تحتضن كافة عناصر المحتوى بالداخل دون أي فواصل أو صناديق معلقة */
     .main-container-card {
         background: #FFFFFF;
         border: 1px solid rgba(226, 232, 240, 0.9);
@@ -323,7 +323,7 @@ def parse_single_file(file_bytes, file_name, session_id):
 
     return pd.DataFrame(monthly_rows)
 
-# 1. ترويسة اللغة في أقصى اليمين تماماً (بالترتيب الصحيح: English ثم العربية المحددة بالكحلي السيادي #0E243A)
+# 1. ترويسة اللغة مطابقة تماماً لتصميم Okular (ترتيب اليمين: English ثم العربية المحددة بالكحلي السيادي #0E243A)
 st.markdown("""
     <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 1.5rem; padding-top: 1rem;">
         <span style="border: 1.5px solid #0E243A; background-color: transparent; color: #0E243A; padding: 6px 16px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;">English</span>
@@ -352,17 +352,17 @@ with col_logo_center:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3. فتح بطاقة المحتوى البيضاء الكبرى (Main White Card Container) لتشمل كافة العناصر بالداخل
+# 3. فتح بطاقة المحتوى البيضاء الكبرى (Main White Card Container) لتشمل كافة العناصر بالداخل دون أي فواصل
 st.markdown('<div class="main-container-card">', unsafe_allow_html=True)
 
 # العنوان الرئيسي والنبذة التعريفية الاستراتيجية
 st.markdown('<div class="platform-title">منصة الاستشارات التنفيذية</div>', unsafe_allow_html=True)
 st.markdown('<div class="platform-desc">أداة تحليل استراتيجية متقدمة لقيادات C-Level ومجالس الإدارة، تمكنك من قراءة الأداء المالي، تحليل تضخم التكاليف، واستشراف المخاطر الاكتوارية عبر محاكاة سيناريوهات حية تدعم قراراتك الاستثمارية بدقة فائقة.</div>', unsafe_allow_html=True)
 
-# شارة سدايا الأمنية داخل البطاقة البيضاء
+# شارة سدايا الأمنية داخل البطاقة البيضاء الكبرى تماماً
 st.markdown('<div class="sdaia-box-okular">🛡️ آمن بالكامل 100% - التزاماً بأنظمة سدايا (SDAIA) ونظام حماية البيانات الشخصية: لا يتم حفظ أي ملفات أو بيانات نهائياً.</div>', unsafe_allow_html=True)
 
-# منطقة رفع الملفات وزر التشغيل التنفيذي متجاوران داخل نفس البطاقة البيضاء الكبرى
+# منطقة رفع الملفات وزر التشغيل التنفيذي متجاوران ومدرجان داخل نفس البطاقة البيضاء الكبرى
 col_upload, col_btn = st.columns([1.3, 1])
 
 with col_upload:
