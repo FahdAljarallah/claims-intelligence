@@ -510,7 +510,7 @@ if uploaded_files and launch_button:
                     if errors == []:
                         base_url = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
                         
-                        # اختيار صفحة اللوحة ديناميكياً بناءً على لغة واجهة التطبيق المختارة
+                        # التوجيه الذكي الصحيح حسب اللغة المفعلة حالياً
                         page_id = "p_yr47xbgq7d" if is_ar else "p_yr47xbgg7d"
                         
                         params_data = {"ds14": {"p_client_session": current_sess}}
