@@ -182,7 +182,7 @@ translations = {
         'processing': "جاري معالجة الملفات وضخها إلى المستودع المركزي...",
         'ready': "📈 تقرير لوحة المؤشرات جاهز:",
         'link': "اضغط هنا لفتح لوحة البيانات التنفيذية",
-        'session_msg': "🔑 معرف الجلسة السيادية النشطة: ",
+        'session_msg': "🔑 معرف الجلسة : ",
         'footer': "© 2026 فهد الجارالله - جميع حقوق محفوظة لبيئة العمل السيادية."
     },
     'en': {
@@ -194,7 +194,7 @@ translations = {
         'processing': "Processing files and loading to the central data warehouse...",
         'ready': "📈 Executive Dashboard Report Ready:",
         'link': "Click here to open the executive dashboard",
-        'session_msg': "🔑 Active Sovereign Session ID: ",
+        'session_msg': "🔑 Session ID: ",
         'footer': "© 2026 Fahd Aljarallah - All rights reserved for the Sovereign Workspace."
     }
 }
