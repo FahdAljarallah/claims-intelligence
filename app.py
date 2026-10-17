@@ -488,6 +488,7 @@ if uploaded_files and launch_button:
     with result_container:
         current_sess = f"sess_{str(uuid.uuid4())[:8]}"
         
+        # عرض رقم الجلسة بوضوح للمستخدم قبل معالجة البيانات
         st.info(f"🔑 معرف الجلسة السيادية النشطة: **{current_sess}**")
         
         with st.spinner(t['processing']):
@@ -508,14 +509,11 @@ if uploaded_files and launch_button:
                     errors = bq_client.insert_rows_json(table_ref, records_to_insert)
                     
                     if errors == []:
+                        # استخدام الرابط الحديث Looker Studio مع فتح في تبويب مستقل لتجنب حظر الأمان (X-Frame)
                         base_url = "https://lookerstudio.google.com/reporting/34329d81-4adf-410e-86a9-24713511ec47"
-                        
-                        # التوجيه الذكي الصحيح حسب اللغة المفعلة حالياً
-                        page_id = "p_yr47xbgq7d" if is_ar else "p_yr47xbgg7d"
-                        
                         params_data = {"ds14": {"p_client_session": current_sess}}
                         encoded_params = urllib.parse.quote(json.dumps(params_data))
-                        looker_url = f"{base_url}/page/{page_id}?params={encoded_params}"
+                        looker_url = f"{base_url}/page/p_yr47xbgg7d?params={encoded_params}"
                         
                         st.markdown(f"""
                             <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 24px; margin-top: 20px; text-align: {text_align}; direction: {direction}; box-shadow: 0 1px 4px rgba(0,0,0,0.02); max-width: 900px; margin-left: auto; margin-right: auto;">
